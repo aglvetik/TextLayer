@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\TextLayer.Domain\TextLayer.Domain.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>TextLayer.Application</AssemblyName>
+    <RootNamespace>TextLayer.Application</RootNamespace>
+  </PropertyGroup>
+</Project>

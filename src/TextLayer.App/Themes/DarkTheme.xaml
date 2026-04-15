@@ -1,0 +1,23 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#111827" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#172032" />
+    <SolidColorBrush x:Key="PanelBorderBrush" Color="#283548" />
+    <SolidColorBrush x:Key="ForegroundBrush" Color="#E7EEF7" />
+    <SolidColorBrush x:Key="SubtleTextBrush" Color="#A2B1C8" />
+    <SolidColorBrush x:Key="ViewerSurfaceBrush" Color="#0D1422" />
+    <SolidColorBrush x:Key="EditorBrush" Color="#111B2B" />
+    <SolidColorBrush x:Key="ButtonBrush" Color="#17283D" />
+    <SolidColorBrush x:Key="ButtonHoverBrush" Color="#20314A" />
+    <SolidColorBrush x:Key="ButtonPressedBrush" Color="#263752" />
+    <SolidColorBrush x:Key="AccentBrush" Color="#76A5FF" />
+    <SolidColorBrush x:Key="AccentForegroundBrush" Color="#08101D" />
+    <SolidColorBrush x:Key="AccentSubtleBrush" Color="#182B4B" />
+    <SolidColorBrush x:Key="ComboSurfaceBrush" Color="#F4F7FC" />
+    <SolidColorBrush x:Key="ComboForegroundBrush" Color="#08101D" />
+    <SolidColorBrush x:Key="ComboPopupBorderBrush" Color="#8FA4C6" />
+    <SolidColorBrush x:Key="ComboDisabledBrush" Color="#D8E0EC" />
+    <SolidColorBrush x:Key="ComboHoverBrush" Color="#E7EEF9" />
+    <SolidColorBrush x:Key="ComboPressedBrush" Color="#D7E2F4" />
+    <SolidColorBrush x:Key="ComboGlyphBrush" Color="#355176" />
+</ResourceDictionary>

@@ -1,0 +1,17 @@
+<UserControl x:Class="TextLayer.App.Controls.ScreenOverlayControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:TextLayer.App.Controls"
+             Focusable="True"
+             Background="Transparent">
+    <Grid Background="Transparent">
+        <Canvas x:Name="SceneCanvas"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="Transparent"
+                RenderTransformOrigin="0,0">
+            <controls:OcrOverlayControl x:Name="OverlayElement"
+                                        IsHitTestVisible="False" />
+        </Canvas>
+    </Grid>
+</UserControl>

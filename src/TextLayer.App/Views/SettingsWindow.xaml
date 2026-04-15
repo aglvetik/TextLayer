@@ -1,0 +1,146 @@
+<Window x:Class="TextLayer.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:services="clr-namespace:TextLayer.App.Services"
+        Title="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.Title]}"
+        Width="560"
+        Height="660"
+        MinWidth="560"
+        MinHeight="620"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Icon="/Assets/TextLayer.ico"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Window.Resources>
+        <Style x:Key="OcrLanguageComboItemStyle"
+               TargetType="ComboBoxItem"
+               BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+        </Style>
+
+        <DataTemplate x:Key="OcrLanguageOptionTemplate">
+            <StackPanel x:Name="OcrLanguageOptionRoot">
+                <TextBlock Text="{Binding Label}"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}" />
+                <TextBlock Margin="0,2,0,0"
+                           FontSize="11"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}"
+                           Opacity="0.78"
+                           Text="{Binding Description}"
+                           Visibility="{Binding HasDescription, Converter={StaticResource BoolToVisibilityConverter}}" />
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                    <Setter TargetName="OcrLanguageOptionRoot" Property="Opacity" Value="0.72" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Background="{DynamicResource PanelBrush}"
+                BorderBrush="{DynamicResource PanelBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="16"
+                Padding="0">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="18">
+                    <TextBlock Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.HeaderTitle]}"
+                               FontSize="24"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.HeaderDescription]}"
+                               Margin="0,6,0,18"
+                               Foreground="{DynamicResource SubtleTextBrush}" />
+
+                    <CheckBox Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.EnableOverlayWorkflow]}"
+                              IsChecked="{Binding IsOverlayEnabled}" />
+                    <CheckBox Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.LaunchAtStartup]}"
+                              Margin="0,12,0,0"
+                              IsChecked="{Binding LaunchAtStartup}" />
+                    <CheckBox Margin="0,12,0,0"
+                              Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.CloseToTray]}"
+                              IsChecked="{Binding CloseToTrayOnClose}" />
+                    <CheckBox Margin="0,12,0,0"
+                              Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.AutoRunOcr]}"
+                              IsChecked="{Binding AutoRunOcrOnOpen}" />
+
+                    <TextBlock Margin="0,20,0,8"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.OcrEngine]}"
+                               FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding OcrModeOptions}"
+                              DisplayMemberPath="Label"
+                              SelectedItem="{Binding SelectedOcrMode}" />
+
+                    <TextBlock Margin="0,16,0,8"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.OcrLanguage]}"
+                               FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding OcrLanguageOptions}"
+                              SelectedItem="{Binding SelectedOcrLanguage}"
+                              ItemContainerStyle="{StaticResource OcrLanguageComboItemStyle}"
+                              ItemTemplate="{StaticResource OcrLanguageOptionTemplate}" />
+                    <Border Margin="0,10,0,0"
+                            Padding="10,8"
+                            Background="{DynamicResource AccentSubtleBrush}"
+                            CornerRadius="12">
+                        <TextBlock Text="{Binding OcrRecommendationText}"
+                                   Foreground="{DynamicResource ForegroundBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[ControlCenter.OcrLanguageHelper]}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.AccurateHelper]}"
+                               TextWrapping="Wrap" />
+
+                    <CheckBox Margin="0,12,0,0"
+                              Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.DebugBounds]}"
+                              IsChecked="{Binding ShowDebugBoundsOverlay}" />
+                    <CheckBox Margin="0,12,0,0"
+                              Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.KeepTextPanel]}"
+                              IsChecked="{Binding IsSidePanelVisible}" />
+                    <CheckBox Margin="0,12,0,0"
+                              Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.CloseOverlayAfterCopy]}"
+                              IsChecked="{Binding CloseOverlayAfterCopy}" />
+
+                    <TextBlock Margin="0,20,0,8"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.AppLanguage]}"
+                               FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding UiLanguageOptions}"
+                              DisplayMemberPath="Label"
+                              SelectedItem="{Binding SelectedUiLanguage}" />
+                    <TextBlock Margin="0,8,0,0"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Settings.UiLanguageHelper]}"
+                               TextWrapping="Wrap" />
+
+                    <TextBlock Margin="0,20,0,8"
+                               Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.Theme]}"
+                               FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding ThemeOptions}"
+                              DisplayMemberPath="Label"
+                              SelectedItem="{Binding SelectedTheme}" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel Grid.Row="1"
+                    Margin="0,16,0,0"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal">
+            <Button Style="{StaticResource ToolbarButtonStyle}"
+                    Click="CancelButton_OnClick"
+                    Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.Cancel]}" />
+            <Button Style="{StaticResource AccentToolbarButtonStyle}"
+                    Click="SaveButton_OnClick"
+                    Content="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.Save]}" />
+        </StackPanel>
+    </Grid>
+</Window>

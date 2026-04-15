@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\TextLayer.Application\TextLayer.Application.csproj" />
+    <ProjectReference Include="..\TextLayer.Domain\TextLayer.Domain.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tesseract" Version="5.2.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>TextLayer.Infrastructure</AssemblyName>
+    <RootNamespace>TextLayer.Infrastructure</RootNamespace>
+  </PropertyGroup>
+</Project>

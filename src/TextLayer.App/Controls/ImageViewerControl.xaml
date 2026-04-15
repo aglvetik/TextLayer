@@ -1,0 +1,27 @@
+<UserControl x:Class="TextLayer.App.Controls.ImageViewerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:TextLayer.App.Controls"
+             Focusable="True"
+             Background="Transparent">
+    <Border x:Name="ViewportHost"
+            Background="Transparent"
+            ClipToBounds="True"
+            SnapsToDevicePixels="True">
+        <Grid Background="Transparent">
+            <Canvas x:Name="SceneCanvas"
+                    Background="Transparent"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top"
+                    SnapsToDevicePixels="True"
+                    RenderTransformOrigin="0,0">
+                <Image x:Name="ImageElement"
+                       Stretch="None"
+                       SnapsToDevicePixels="True"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <local:OcrOverlayControl x:Name="OverlayElement"
+                                         IsHitTestVisible="False" />
+            </Canvas>
+        </Grid>
+    </Border>
+</UserControl>

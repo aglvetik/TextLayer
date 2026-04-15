@@ -1,0 +1,10 @@
+namespace TextLayer.Application.Abstractions;
+
+public interface ILogService
+{
+    void Info(string message);
+
+    void Warn(string message);
+
+    void Error(string message, Exception? exception = null);
+}

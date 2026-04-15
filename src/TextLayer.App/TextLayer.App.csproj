@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\TextLayer.Application\TextLayer.Application.csproj" />
+    <ProjectReference Include="..\TextLayer.Infrastructure\TextLayer.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\TextLayer.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Assets\tessdata\**\*"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="tessdata\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\TextLayer.ico</ApplicationIcon>
+    <AssemblyName>TextLayer</AssemblyName>
+    <RootNamespace>TextLayer.App</RootNamespace>
+    <StartupObject>TextLayer.App.App</StartupObject>
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>TextLayer.Domain</AssemblyName>
+    <RootNamespace>TextLayer.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>
