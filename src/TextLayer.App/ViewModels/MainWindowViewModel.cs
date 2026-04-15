@@ -219,12 +219,19 @@ public sealed class MainWindowViewModel : ObservableObject
         get => selectedQuickOcrMode;
         set
         {
-            if (!SetProperty(ref selectedQuickOcrMode, value))
+            if (!value.IsEnabled)
             {
                 return;
             }
 
-            CurrentSettings = CurrentSettings with { OcrMode = value.Value };
+            var resolvedMode = AppSettings.NormalizeOcrModeForLanguage(value.Value, SelectedQuickOcrLanguage.Value);
+            var resolvedOption = QuickOcrModeOptions.First(option => option.Value == resolvedMode);
+            if (!SetProperty(ref selectedQuickOcrMode, resolvedOption))
+            {
+                return;
+            }
+
+            CurrentSettings = AppSettings.NormalizeOcrBehavior(CurrentSettings with { OcrMode = resolvedMode });
             OnPropertyChanged(nameof(StateDescription));
             _ = PersistQuickSettingsAsync();
         }
@@ -245,8 +252,18 @@ public sealed class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            CurrentSettings = CurrentSettings with { OcrLanguageMode = value.Value };
+            BuildQuickOptionLists(value.Value);
+            selectedQuickOcrLanguage = QuickOcrLanguageOptions.First(option => option.Value == value.Value);
+            OnPropertyChanged(nameof(SelectedQuickOcrLanguage));
+            selectedQuickOcrMode = QuickOcrModeOptions.First(option => option.Value == AppSettings.NormalizeOcrModeForLanguage(selectedQuickOcrMode.Value, value.Value));
+            OnPropertyChanged(nameof(SelectedQuickOcrMode));
+            CurrentSettings = AppSettings.NormalizeOcrBehavior(CurrentSettings with
+            {
+                OcrLanguageMode = value.Value,
+                OcrMode = selectedQuickOcrMode.Value,
+            });
             OnPropertyChanged(nameof(OcrRecommendationText));
+            OnPropertyChanged(nameof(StateDescription));
             _ = PersistQuickSettingsAsync();
         }
     }
@@ -315,7 +332,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        CurrentSettings = await settingsManager.LoadAsync(executablePath, CancellationToken.None);
+        CurrentSettings = AppSettings.NormalizeOcrBehavior(
+            await settingsManager.LoadAsync(executablePath, CancellationToken.None));
         Localizer.ApplyLanguage(CurrentSettings.UiLanguagePreference);
         BuildQuickOptionLists();
         IsSidePanelVisible = CurrentSettings.IsSidePanelVisible;
@@ -384,6 +402,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public async Task ApplySettingsAsync(AppSettings updatedSettings)
     {
+        updatedSettings = AppSettings.NormalizeOcrBehavior(updatedSettings);
         Localizer.ApplyLanguage(updatedSettings.UiLanguagePreference);
         CurrentSettings = updatedSettings;
         BuildQuickOptionLists();
@@ -556,13 +575,11 @@ public sealed class MainWindowViewModel : ObservableObject
         };
 
     private void BuildQuickOptionLists()
+        => BuildQuickOptionLists(CurrentSettings.OcrLanguageMode);
+
+    private void BuildQuickOptionLists(OcrLanguageMode languageMode)
     {
-        QuickOcrModeOptions =
-        [
-            new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
-            new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
-            new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
-        ];
+        QuickOcrModeOptions = CreateOcrModeOptions(languageMode);
         QuickOcrLanguageOptions =
         [
             new OcrLanguageOption("OcrLanguage.Auto", OcrLanguageMode.Auto, isEnabled: false, descriptionKey: "Common.InActiveDevelopment"),
@@ -618,13 +635,16 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplySettingsToQuickControls(AppSettings settings)
     {
+        settings = AppSettings.NormalizeOcrBehavior(settings);
         suppressQuickSettingsPersistence = true;
         try
         {
             isOverlayEnabled = settings.IsOverlayEnabled;
             closeToTrayOnClose = settings.CloseToTrayOnClose;
-            selectedQuickOcrMode = QuickOcrModeOptions.First(option => option.Value == settings.OcrMode);
-            selectedQuickOcrLanguage = QuickOcrLanguageOptions.First(option => option.Value == NormalizeVisibleLanguageMode(settings.OcrLanguageMode));
+            var visibleLanguageMode = AppSettings.NormalizeVisibleOcrLanguageMode(settings.OcrLanguageMode);
+            BuildQuickOptionLists(visibleLanguageMode);
+            selectedQuickOcrMode = QuickOcrModeOptions.First(option => option.Value == AppSettings.NormalizeOcrModeForLanguage(settings.OcrMode, visibleLanguageMode));
+            selectedQuickOcrLanguage = QuickOcrLanguageOptions.First(option => option.Value == visibleLanguageMode);
         }
         finally
         {
@@ -679,11 +699,6 @@ public sealed class MainWindowViewModel : ObservableObject
             _ => engineId,
         };
 
-    private static OcrLanguageMode NormalizeVisibleLanguageMode(OcrLanguageMode languageMode)
-        => languageMode == OcrLanguageMode.EnglishRussian
-            ? OcrLanguageMode.Auto
-            : languageMode;
-
     private static string GetOcrRecommendationText(OcrLanguageMode languageMode)
         => languageMode switch
         {
@@ -691,4 +706,18 @@ public sealed class MainWindowViewModel : ObservableObject
             OcrLanguageMode.Russian => Localizer["ControlCenter.OcrRecommendation.Russian"],
             _ => Localizer["ControlCenter.OcrRecommendation.English"],
         };
+
+    private static IReadOnlyList<OcrModeOption> CreateOcrModeOptions(OcrLanguageMode languageMode)
+        => AppSettings.NormalizeVisibleOcrLanguageMode(languageMode) == OcrLanguageMode.Russian
+            ?
+            [
+                new OcrModeOption("OcrMode.Fast", OcrMode.Fast, isEnabled: false, descriptionKey: "Common.InDevelopmentForRussian"),
+                new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
+            ]
+            :
+            [
+                new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
+                new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
+                new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
+            ];
 }

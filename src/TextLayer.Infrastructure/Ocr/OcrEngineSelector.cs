@@ -9,6 +9,11 @@ public sealed class OcrEngineSelector
 
     public string SelectEngineId(string sourcePath, OcrRequestOptions request, OcrImageAnalysis analysis)
     {
+        if (request.Mode == OcrMode.Fast && request.LanguageMode == OcrLanguageMode.Russian)
+        {
+            return AccurateEngineId;
+        }
+
         if (request.Mode == OcrMode.Fast)
         {
             return FastEngineId;
@@ -41,6 +46,11 @@ public sealed class OcrEngineSelector
 
     public IReadOnlyList<string> GetEnginePreferenceOrder(string sourcePath, OcrRequestOptions request, OcrImageAnalysis analysis)
     {
+        if (request.Mode == OcrMode.Fast && request.LanguageMode == OcrLanguageMode.Russian)
+        {
+            return [AccurateEngineId];
+        }
+
         if (request.Mode == OcrMode.Fast)
         {
             return [FastEngineId];

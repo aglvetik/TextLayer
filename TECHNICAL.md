@@ -209,10 +209,30 @@ Language choice is stored in settings and applied on startup. Main-window text u
 
 The project builds as a normal WPF `WinExe`, so the published output can be launched by double-clicking `TextLayer.exe` without a console window.
 
+### Canonical user-facing output
+
+The canonical publish/output folder is:
+
+- `dist\TextLayer`
+
+Root-level helpers:
+
+- `publish.ps1`: clears and republishes the app into `dist\TextLayer`
+- `publish.bat`: simple Windows wrapper around `publish.ps1`
+- `Start-TextLayer.bat`: launches `dist\TextLayer\TextLayer.exe` if it exists, otherwise tells the user to publish first
+
+This keeps the user-facing app separate from development outputs such as:
+
+- `src\TextLayer.App\bin\Debug\...`
+- `src\TextLayer.App\bin\Release\...`
+
+Those `bin` folders remain normal .NET build outputs for development only and should not be treated as the canonical runnable app location.
+
 Tesseract assets are repository-owned and ship with the app:
 
 - source assets: `src/TextLayer.App/Assets/tessdata`
 - runtime lookup: `AppContext.BaseDirectory\\tessdata`
+- canonical published runtime location: `dist\TextLayer\tessdata`
 
 `TesseractDataPathResolver` checks predictable project-owned locations first and only consults `TESSDATA_PREFIX` as a fallback. The release/publish output copies the required `eng` and `rus` traineddata files automatically.
 

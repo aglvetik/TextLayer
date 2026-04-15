@@ -19,17 +19,13 @@ public sealed class SettingsWindowViewModel : ObservableObject
 
     public SettingsWindowViewModel(AppSettings settings)
     {
+        settings = AppSettings.NormalizeOcrBehavior(settings);
+
         ThemeOptions =
         [
             new ThemeOption("Theme.System", ThemePreference.System),
             new ThemeOption("Theme.Light", ThemePreference.Light),
             new ThemeOption("Theme.Dark", ThemePreference.Dark),
-        ];
-        OcrModeOptions =
-        [
-            new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
-            new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
-            new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
         ];
         OcrLanguageOptions =
         [
@@ -47,8 +43,9 @@ public sealed class SettingsWindowViewModel : ObservableObject
         launchAtStartup = settings.LaunchAtStartup;
         closeToTrayOnClose = settings.CloseToTrayOnClose;
         autoRunOcrOnOpen = settings.AutoRunOcrOnOpen;
-        selectedOcrMode = OcrModeOptions.First(option => option.Value == settings.OcrMode);
-        selectedOcrLanguage = OcrLanguageOptions.First(option => option.Value == NormalizeVisibleLanguageMode(settings.OcrLanguageMode));
+        selectedOcrLanguage = OcrLanguageOptions.First(option => option.Value == AppSettings.NormalizeVisibleOcrLanguageMode(settings.OcrLanguageMode));
+        OcrModeOptions = CreateOcrModeOptions(selectedOcrLanguage.Value);
+        selectedOcrMode = OcrModeOptions.First(option => option.Value == AppSettings.NormalizeOcrModeForLanguage(settings.OcrMode, selectedOcrLanguage.Value));
         selectedUiLanguage = UiLanguageOptions.First(option => option.Value == settings.UiLanguagePreference);
         showDebugBoundsOverlay = settings.ShowDebugBoundsOverlay;
         isSidePanelVisible = settings.IsSidePanelVisible;
@@ -58,7 +55,7 @@ public sealed class SettingsWindowViewModel : ObservableObject
 
     public IReadOnlyList<ThemeOption> ThemeOptions { get; }
 
-    public IReadOnlyList<OcrModeOption> OcrModeOptions { get; }
+    public IReadOnlyList<OcrModeOption> OcrModeOptions { get; private set; } = [];
 
     public IReadOnlyList<OcrLanguageOption> OcrLanguageOptions { get; }
 
@@ -91,7 +88,17 @@ public sealed class SettingsWindowViewModel : ObservableObject
     public OcrModeOption SelectedOcrMode
     {
         get => selectedOcrMode;
-        set => SetProperty(ref selectedOcrMode, value);
+        set
+        {
+            if (!value.IsEnabled)
+            {
+                return;
+            }
+
+            var normalizedMode = AppSettings.NormalizeOcrModeForLanguage(value.Value, SelectedOcrLanguage.Value);
+            var resolvedOption = OcrModeOptions.First(option => option.Value == normalizedMode);
+            SetProperty(ref selectedOcrMode, resolvedOption);
+        }
     }
 
     public OcrLanguageOption SelectedOcrLanguage
@@ -106,6 +113,10 @@ public sealed class SettingsWindowViewModel : ObservableObject
 
             if (SetProperty(ref selectedOcrLanguage, value))
             {
+                OcrModeOptions = CreateOcrModeOptions(value.Value);
+                selectedOcrMode = OcrModeOptions.First(option => option.Value == AppSettings.NormalizeOcrModeForLanguage(selectedOcrMode.Value, value.Value));
+                OnPropertyChanged(nameof(OcrModeOptions));
+                OnPropertyChanged(nameof(SelectedOcrMode));
                 OnPropertyChanged(nameof(OcrRecommendationText));
             }
         }
@@ -155,7 +166,7 @@ public sealed class SettingsWindowViewModel : ObservableObject
             LaunchAtStartup = LaunchAtStartup,
             CloseToTrayOnClose = CloseToTrayOnClose,
             AutoRunOcrOnOpen = AutoRunOcrOnOpen,
-            OcrMode = SelectedOcrMode.Value,
+            OcrMode = AppSettings.NormalizeOcrModeForLanguage(SelectedOcrMode.Value, SelectedOcrLanguage.Value),
             OcrLanguageMode = SelectedOcrLanguage.Value,
             UiLanguagePreference = SelectedUiLanguage.Value,
             ThemePreference = SelectedTheme.Value,
@@ -165,8 +176,17 @@ public sealed class SettingsWindowViewModel : ObservableObject
             WindowPlacement = placement,
         };
 
-    private static OcrLanguageMode NormalizeVisibleLanguageMode(OcrLanguageMode languageMode)
-        => languageMode == OcrLanguageMode.EnglishRussian
-            ? OcrLanguageMode.Auto
-            : languageMode;
+    private static IReadOnlyList<OcrModeOption> CreateOcrModeOptions(OcrLanguageMode languageMode)
+        => AppSettings.NormalizeVisibleOcrLanguageMode(languageMode) == OcrLanguageMode.Russian
+            ?
+            [
+                new OcrModeOption("OcrMode.Fast", OcrMode.Fast, isEnabled: false, descriptionKey: "Common.InDevelopmentForRussian"),
+                new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
+            ]
+            :
+            [
+                new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
+                new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
+                new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
+            ];
 }

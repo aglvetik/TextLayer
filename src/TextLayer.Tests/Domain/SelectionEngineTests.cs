@@ -49,4 +49,17 @@ public sealed class SelectionEngineTests
         Assert.True(hit.IsHit);
         Assert.Equal(word.WordId, hit.Word?.WordId);
     }
+
+    [Fact]
+    public void HitTest_CanReachSmallWordNearPointer()
+    {
+        var selectionEngine = new SelectionEngine(new TextNormalizer());
+        var shortWord = new RecognizedWord(Guid.NewGuid(), 0, 0, "и", "и", new RectD(20, 10, 6, 10), null, null);
+        var document = new RecognizedDocument(Guid.NewGuid(), "sample.png", 100, 100, string.Empty, [], [shortWord], DateTime.UtcNow, 10, "test", null);
+
+        var hit = selectionEngine.HitTest(document, new PointD(28.5d, 15d), 3d);
+
+        Assert.True(hit.IsHit);
+        Assert.Equal(shortWord.WordId, hit.Word?.WordId);
+    }
 }

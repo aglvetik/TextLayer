@@ -12,6 +12,30 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
     <Window.Resources>
+        <Style x:Key="OcrModeComboItemStyle"
+               TargetType="ComboBoxItem"
+               BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+            <Setter Property="IsEnabled" Value="{Binding IsEnabled}" />
+        </Style>
+
+        <DataTemplate x:Key="OcrModeOptionTemplate">
+            <StackPanel x:Name="OcrModeOptionRoot">
+                <TextBlock Text="{Binding Label}"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}" />
+                <TextBlock Margin="0,2,0,0"
+                           FontSize="11"
+                           Foreground="{Binding RelativeSource={RelativeSource AncestorType=ComboBoxItem}, Path=Foreground}"
+                           Opacity="0.78"
+                           Text="{Binding Description}"
+                           Visibility="{Binding HasDescription, Converter={StaticResource BoolToVisibilityConverter}}" />
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                    <Setter TargetName="OcrModeOptionRoot" Property="Opacity" Value="0.72" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <Style x:Key="OcrLanguageComboItemStyle"
                TargetType="ComboBoxItem"
                BasedOn="{StaticResource {x:Type ComboBoxItem}}">
@@ -73,8 +97,9 @@
                                Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.OcrEngine]}"
                                FontWeight="SemiBold" />
                     <ComboBox ItemsSource="{Binding OcrModeOptions}"
-                              DisplayMemberPath="Label"
-                              SelectedItem="{Binding SelectedOcrMode}" />
+                              SelectedItem="{Binding SelectedOcrMode}"
+                              ItemContainerStyle="{StaticResource OcrModeComboItemStyle}"
+                              ItemTemplate="{StaticResource OcrModeOptionTemplate}" />
 
                     <TextBlock Margin="0,16,0,8"
                                Text="{Binding Source={x:Static services:UiTextService.Instance}, Path=[Common.OcrLanguage]}"

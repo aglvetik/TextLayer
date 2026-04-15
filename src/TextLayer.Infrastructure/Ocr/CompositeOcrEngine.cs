@@ -198,7 +198,7 @@ public sealed class CompositeOcrEngine(
     {
         var evaluatedCandidates = new List<ScoredRecognitionCandidate>();
 
-        foreach (var languageMode in GetLanguageEvaluationOrder(engineId, originalRequest.LanguageMode))
+        foreach (var languageMode in GetLanguageEvaluationOrder(engineId, originalRequest))
         {
             var candidateRequest = originalRequest with { LanguageMode = languageMode };
             try
@@ -242,16 +242,19 @@ public sealed class CompositeOcrEngine(
         return bestCandidate;
     }
 
-    private static IReadOnlyList<OcrLanguageMode> GetLanguageEvaluationOrder(string engineId, OcrLanguageMode requestedLanguageMode)
-        => (engineId, requestedLanguageMode) switch
+    private static IReadOnlyList<OcrLanguageMode> GetLanguageEvaluationOrder(string engineId, OcrRequestOptions request)
+        => (engineId, request.Mode, request.LanguageMode) switch
         {
-            (OcrEngineSelector.AccurateEngineId, OcrLanguageMode.Russian) => [OcrLanguageMode.Russian, OcrLanguageMode.EnglishRussian],
-            (OcrEngineSelector.AccurateEngineId, OcrLanguageMode.English) => [OcrLanguageMode.English, OcrLanguageMode.EnglishRussian],
-            (OcrEngineSelector.AccurateEngineId, OcrLanguageMode.EnglishRussian) => [OcrLanguageMode.EnglishRussian, OcrLanguageMode.Russian, OcrLanguageMode.English],
-            (_, OcrLanguageMode.Russian) => [OcrLanguageMode.Russian],
-            (_, OcrLanguageMode.EnglishRussian) => [OcrLanguageMode.EnglishRussian, OcrLanguageMode.Russian, OcrLanguageMode.English],
-            (_, OcrLanguageMode.English) => [OcrLanguageMode.English],
-            _ => [requestedLanguageMode],
+            (OcrEngineSelector.AccurateEngineId, OcrMode.Accurate, OcrLanguageMode.Russian)
+                => [OcrLanguageMode.Russian, OcrLanguageMode.EnglishRussian],
+            (OcrEngineSelector.AccurateEngineId, OcrMode.Accurate, OcrLanguageMode.English)
+                => [OcrLanguageMode.English, OcrLanguageMode.EnglishRussian],
+            (OcrEngineSelector.AccurateEngineId, _, OcrLanguageMode.EnglishRussian)
+                => [OcrLanguageMode.EnglishRussian, OcrLanguageMode.Russian, OcrLanguageMode.English],
+            (_, _, OcrLanguageMode.Russian) => [OcrLanguageMode.Russian],
+            (_, _, OcrLanguageMode.EnglishRussian) => [OcrLanguageMode.EnglishRussian, OcrLanguageMode.Russian, OcrLanguageMode.English],
+            (_, _, OcrLanguageMode.English) => [OcrLanguageMode.English],
+            _ => [request.LanguageMode],
         };
 
     private static bool ShouldPreferMixedLanguageCandidate(

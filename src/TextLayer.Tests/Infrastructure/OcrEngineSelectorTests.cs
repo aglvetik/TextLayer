@@ -65,7 +65,7 @@ public sealed class OcrEngineSelectorTests
     }
 
     [Fact]
-    public void FastMode_RespectsExplicitRussianSelection()
+    public void FastMode_RoutesRussianToReliableCyrillicPath()
     {
         var analysis = new OcrImageAnalysis(
             PixelWidth: 1280,
@@ -83,6 +83,6 @@ public sealed class OcrEngineSelectorTests
             new OcrRequestOptions(OcrMode.Fast, OcrLanguageMode.Russian),
             analysis);
 
-        Assert.Equal(OcrEngineSelector.FastEngineId, selected);
+        Assert.Equal(OcrEngineSelector.AccurateEngineId, selected);
     }
 }

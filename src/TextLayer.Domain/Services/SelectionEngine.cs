@@ -18,12 +18,6 @@ public sealed class SelectionEngine(TextNormalizer normalizer) : ISelectionEngin
 
         foreach (var word in document.Words)
         {
-            var expanded = word.BoundingRect.Inflate(tolerance);
-            if (!expanded.Contains(point))
-            {
-                continue;
-            }
-
             var distance = word.BoundingRect.DistanceTo(point);
             if (distance < closestDistance || (Math.Abs(distance - closestDistance) < 0.001d && word.Index < closest?.Index))
             {

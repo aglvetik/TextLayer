@@ -26,7 +26,30 @@ OCR runs locally on your machine. TextLayer does not send captured images over t
 
 The control center and settings UI can be switched between English and Russian.
 
-## Run From Source
+## Normal User Run Path
+
+TextLayer’s canonical app folder is:
+
+`dist\TextLayer`
+
+Use that folder only for normal use. The `src\...\bin\Debug` and `src\...\bin\Release` folders are development outputs and may contain older builds.
+
+Publish the app once from the repo root:
+
+```powershell
+.\publish.bat
+```
+
+That creates a fresh runnable build in `dist\TextLayer` with the required OCR assets bundled beside the app.
+
+Then launch TextLayer with either:
+
+- `.\Start-TextLayer.bat`
+- or `dist\TextLayer\TextLayer.exe`
+
+Settings persist across runs. After launch, the main workflow is `Ctrl+Shift+O` to capture a region from another app and copy text from the overlay.
+
+## Development Run
 
 Requirements:
 
@@ -45,17 +68,11 @@ Run:
 dotnet run --project .\src\TextLayer.App\TextLayer.App.csproj
 ```
 
-Or build once and launch it like a normal Windows app:
+If you want the same user-facing build that a normal user should run, publish to the canonical folder instead of opening an `.exe` from `bin`:
 
 ```powershell
-dotnet publish .\src\TextLayer.App\TextLayer.App.csproj -c Release -r win-x64 --self-contained false -o .\artifacts\publish\TextLayer
+.\publish.bat
 ```
-
-Then open:
-
-`artifacts\publish\TextLayer\TextLayer.exe`
-
-You can double-click `TextLayer.exe` directly or create a normal Windows shortcut to it.
 
 Run tests:
 
@@ -67,14 +84,18 @@ dotnet test TextLayer.sln
 
 - The tray-first overlay workflow is the main product path.
 - English and Russian are the supported public OCR language choices in the UI.
+- English can use either `Fast` or `Accurate` OCR.
+- Russian currently uses `Accurate` OCR only.
+- Fast OCR for Russian is still in development and is shown as unavailable in the app UI.
 - The Auto OCR language option is still visible in the app, but it is marked as being in active development.
 - The older in-app image viewer remains available as a secondary feature.
 - Core settings persist across restarts.
-- Local Tesseract OCR assets are included with the project and are copied automatically into the publish output.
+- The published `dist\TextLayer` folder contains the correct app build and the required local Tesseract OCR assets.
 
 ## Current Limitations
 
 - OCR quality still depends on the source image, especially with very small text, gradients, and dense UI screenshots.
+- Russian OCR currently relies on Accurate mode because Fast OCR for Russian is not ready for general use yet.
 - Auto OCR language remains experimental.
 - Region capture is single-monitor per capture.
 - No installer is included yet; the repo currently targets a clean unpackaged build first.

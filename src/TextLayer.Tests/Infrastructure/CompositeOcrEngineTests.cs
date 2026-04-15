@@ -92,7 +92,7 @@ public sealed class CompositeOcrEngineTests
     }
 
     [Fact]
-    public async Task FastMode_KeepsExplicitRussianRequest_OnFastEngine()
+    public async Task FastMode_RoutesRussianThroughReliableCyrillicEngine()
     {
         var sourcePath = CreateTempImage();
         try
@@ -117,7 +117,7 @@ public sealed class CompositeOcrEngineTests
                 new OcrRequestOptions(OcrMode.Fast, OcrLanguageMode.Russian),
                 CancellationToken.None);
 
-            Assert.Equal(OcrEngineSelector.FastEngineId, document.OcrEngineId);
+            Assert.Equal(OcrEngineSelector.AccurateEngineId, document.OcrEngineId);
             Assert.Contains("\u041f\u0440\u0438\u0432\u0435\u0442", document.FullText);
         }
         finally

@@ -81,6 +81,23 @@ public sealed class ScriptAwareOcrPostProcessorTests
         Assert.Equal("\u0442\u0435\u043A\u0441\u0442", processed.Words[1].Text);
     }
 
+    [Fact]
+    public void Process_DoesNotMergeStandaloneShortWord_WithNeighboringWord()
+    {
+        var document = CreateDocument(
+            new[]
+            {
+                CreateWord("\u0438", 0, 0, new RectD(12, 18, 7, 20)),
+                CreateWord("\u043c\u0438\u0440", 1, 0, new RectD(23.8d, 18, 28, 20)),
+            });
+
+        var processed = postProcessor.Process(document, OcrLanguageMode.Russian).Document;
+
+        Assert.Equal(2, processed.Words.Count);
+        Assert.Equal("\u0438", processed.Words[0].Text);
+        Assert.Equal("\u043c\u0438\u0440", processed.Words[1].Text);
+    }
+
     private static RecognizedDocument CreateDocument(params IReadOnlyList<RecognizedWord>[] lines)
     {
         var words = new List<RecognizedWord>();

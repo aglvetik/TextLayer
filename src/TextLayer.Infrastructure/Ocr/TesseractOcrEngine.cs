@@ -41,7 +41,9 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
             return postProcessor.Process(
                     document with { RecognitionDurationMs = stopwatch.ElapsedMilliseconds },
                     request.LanguageMode,
-                    RecognizedDocumentNoiseFilter.NoiseFilterProfile.MaximumCoverage)
+                    request.Mode == OcrMode.Accurate
+                        ? RecognizedDocumentNoiseFilter.NoiseFilterProfile.MaximumCoverage
+                        : RecognizedDocumentNoiseFilter.NoiseFilterProfile.Standard)
                 .Document;
         }
         catch (TesseractConfigurationException)
@@ -74,19 +76,31 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         var candidates = BuildCandidates(basePix, plan, raster.AccentPngBytes);
         try
         {
-            TesseractDocumentCandidate? bestCandidate = null;
+            var scoredCandidates = new List<TesseractDocumentCandidate>(candidates.Count);
             foreach (var candidate in candidates)
             {
-                using var page = engine.Process(candidate.Image, PageSegMode.Auto);
-                var mappedCandidate = MapPage(sourcePath, raster, request, page);
-                if (bestCandidate is null || mappedCandidate.Score > bestCandidate.Score)
+                using (var page = engine.Process(candidate.Image, PageSegMode.Auto))
                 {
-                    bestCandidate = mappedCandidate;
+                    scoredCandidates.Add(MapPage(sourcePath, raster, request, page));
+                }
+
+                if (request.Mode == OcrMode.Accurate)
+                {
+                    using (var sparsePage = engine.Process(candidate.Image, PageSegMode.SparseText))
+                    {
+                        scoredCandidates.Add(MapPage(sourcePath, raster, request, sparsePage));
+                    }
+
+                    using (var singleBlockPage = engine.Process(candidate.Image, PageSegMode.SingleBlock))
+                    {
+                        scoredCandidates.Add(MapPage(sourcePath, raster, request, singleBlockPage));
+                    }
                 }
             }
 
-            return bestCandidate?.Document
-                ?? new RecognizedDocument(
+            if (scoredCandidates.Count == 0)
+            {
+                return new RecognizedDocument(
                     DocumentId: Guid.NewGuid(),
                     SourcePath: sourcePath,
                     ImagePixelWidth: raster.OriginalWidth,
@@ -98,6 +112,16 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
                     RecognitionDurationMs: 0,
                     OcrEngineId: OcrEngineSelector.AccurateEngineId,
                     LanguageHint: GetLanguageCode(request.LanguageMode));
+            }
+
+            var orderedCandidates = scoredCandidates
+                .OrderByDescending(candidate => candidate.Score)
+                .Select(candidate => candidate.Document)
+                .ToArray();
+
+            return request.Mode == OcrMode.Accurate
+                ? MergeCoverageCandidates(orderedCandidates)
+                : orderedCandidates[0];
         }
         finally
         {
@@ -285,6 +309,173 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
             + (nonWhitespaceCount * 0.85d)
             + (meanConfidence * 1.15d)
             + languageBonus;
+    }
+
+    private static RecognizedDocument MergeCoverageCandidates(IReadOnlyList<RecognizedDocument> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            throw new InvalidOperationException("TextLayer expected at least one OCR candidate.");
+        }
+
+        if (candidates.Count == 1)
+        {
+            return candidates[0];
+        }
+
+        var mergedWords = new List<RecognizedWord>(candidates[0].Words.Count);
+        foreach (var document in candidates)
+        {
+            foreach (var word in document.Words.OrderBy(candidate => candidate.Index))
+            {
+                if (string.IsNullOrWhiteSpace(word.NormalizedText))
+                {
+                    continue;
+                }
+
+                var existingIndex = FindExistingWordIndex(mergedWords, word);
+                if (existingIndex >= 0)
+                {
+                    var preferred = ChoosePreferredWord(mergedWords[existingIndex], word);
+                    mergedWords[existingIndex] = preferred;
+                    continue;
+                }
+
+                mergedWords.Add(word);
+            }
+        }
+
+        return RebuildDocument(candidates[0], mergedWords);
+    }
+
+    private static int FindExistingWordIndex(IReadOnlyList<RecognizedWord> existingWords, RecognizedWord candidate)
+    {
+        for (var index = 0; index < existingWords.Count; index++)
+        {
+            if (RepresentsSameVisibleWord(existingWords[index], candidate))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool RepresentsSameVisibleWord(RecognizedWord left, RecognizedWord right)
+    {
+        var horizontalOverlap = Math.Max(0d, Math.Min(left.BoundingRect.Right, right.BoundingRect.Right) - Math.Max(left.BoundingRect.Left, right.BoundingRect.Left));
+        var verticalOverlap = Math.Max(0d, Math.Min(left.BoundingRect.Bottom, right.BoundingRect.Bottom) - Math.Max(left.BoundingRect.Top, right.BoundingRect.Top));
+        var overlapArea = horizontalOverlap * verticalOverlap;
+        var minArea = Math.Max(1d, Math.Min(left.BoundingRect.Width * left.BoundingRect.Height, right.BoundingRect.Width * right.BoundingRect.Height));
+        if (overlapArea / minArea >= 0.34d)
+        {
+            return true;
+        }
+
+        var leftCenterX = left.BoundingRect.Left + (left.BoundingRect.Width / 2d);
+        var rightCenterX = right.BoundingRect.Left + (right.BoundingRect.Width / 2d);
+        var leftCenterY = left.BoundingRect.Top + (left.BoundingRect.Height / 2d);
+        var rightCenterY = right.BoundingRect.Top + (right.BoundingRect.Height / 2d);
+
+        var horizontalDistance = Math.Abs(leftCenterX - rightCenterX);
+        var verticalDistance = Math.Abs(leftCenterY - rightCenterY);
+        return horizontalDistance <= Math.Clamp(Math.Max(left.BoundingRect.Width, right.BoundingRect.Width) * 0.42d, 4d, 18d)
+            && verticalDistance <= Math.Clamp(Math.Max(left.BoundingRect.Height, right.BoundingRect.Height) * 0.55d, 3d, 14d);
+    }
+
+    private static RecognizedWord ChoosePreferredWord(RecognizedWord existing, RecognizedWord candidate)
+    {
+        var existingScore = GetWordPreferenceScore(existing);
+        var candidateScore = GetWordPreferenceScore(candidate);
+        return candidateScore > existingScore ? candidate : existing;
+    }
+
+    private static double GetWordPreferenceScore(RecognizedWord word)
+    {
+        var alphaNumericCount = word.NormalizedText.Count(static character => char.IsLetterOrDigit(character));
+        var symbolCount = word.NormalizedText.Count(static character => !char.IsWhiteSpace(character) && !char.IsLetterOrDigit(character));
+        return (alphaNumericCount * 5d)
+            + (word.NormalizedText.Length * 1.4d)
+            - (symbolCount * 0.6d)
+            + ((word.Confidence ?? 70d) * 0.08d);
+    }
+
+    private static RecognizedDocument RebuildDocument(RecognizedDocument template, IReadOnlyList<RecognizedWord> sourceWords)
+    {
+        if (sourceWords.Count == 0)
+        {
+            return template with
+            {
+                Lines = [],
+                Words = [],
+                FullText = string.Empty,
+            };
+        }
+
+        var lineBuckets = new List<List<RecognizedWord>>();
+        foreach (var word in sourceWords
+                     .OrderBy(candidate => candidate.BoundingRect.Top)
+                     .ThenBy(candidate => candidate.BoundingRect.Left))
+        {
+            var assignedLine = lineBuckets.FirstOrDefault(line => BelongsToLine(word, line));
+            if (assignedLine is null)
+            {
+                assignedLine = new List<RecognizedWord>();
+                lineBuckets.Add(assignedLine);
+            }
+
+            assignedLine.Add(word);
+        }
+
+        var rebuiltWords = new List<RecognizedWord>(sourceWords.Count);
+        var rebuiltLines = new List<RecognizedLine>(lineBuckets.Count);
+
+        foreach (var line in lineBuckets.OrderBy(candidate => candidate.Min(word => word.BoundingRect.Top)))
+        {
+            var orderedWords = line.OrderBy(word => word.BoundingRect.Left).ToArray();
+            var lineIndex = rebuiltLines.Count;
+            var remappedWords = orderedWords
+                .Select((word, index) => word with
+                {
+                    Index = rebuiltWords.Count + index,
+                    LineIndex = lineIndex,
+                })
+                .ToArray();
+
+            rebuiltWords.AddRange(remappedWords);
+            rebuiltLines.Add(new RecognizedLine(
+                Guid.NewGuid(),
+                lineIndex,
+                string.Join(' ', remappedWords.Select(word => word.Text)),
+                BuildLineRect(remappedWords),
+                null,
+                remappedWords.Select(word => word.WordId).ToArray()));
+        }
+
+        return template with
+        {
+            Lines = rebuiltLines,
+            Words = rebuiltWords,
+            FullText = string.Join(Environment.NewLine, rebuiltLines.Select(line => line.Text)),
+        };
+    }
+
+    private static bool BelongsToLine(RecognizedWord word, IReadOnlyList<RecognizedWord> lineWords)
+    {
+        if (lineWords.Count == 0)
+        {
+            return true;
+        }
+
+        var lineTop = lineWords.Min(candidate => candidate.BoundingRect.Top);
+        var lineBottom = lineWords.Max(candidate => candidate.BoundingRect.Bottom);
+        var lineCenterY = lineTop + ((lineBottom - lineTop) / 2d);
+        var wordCenterY = word.BoundingRect.Top + (word.BoundingRect.Height / 2d);
+        var minHeight = Math.Min(word.BoundingRect.Height, lineBottom - lineTop);
+        var verticalOverlap = Math.Max(0d, Math.Min(word.BoundingRect.Bottom, lineBottom) - Math.Max(word.BoundingRect.Top, lineTop));
+
+        return Math.Abs(wordCenterY - lineCenterY) <= Math.Clamp(Math.Max(word.BoundingRect.Height, lineBottom - lineTop) * 0.55d, 4d, 18d)
+            || verticalOverlap >= minHeight * 0.34d;
     }
 
     private static string GetLanguageCode(OcrLanguageMode languageMode)

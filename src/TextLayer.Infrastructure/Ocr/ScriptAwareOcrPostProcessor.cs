@@ -700,6 +700,14 @@ public sealed class ScriptAwareOcrPostProcessor
 
         var leftMetrics = AnalyzeWord(left.NormalizedText);
         var rightMetrics = AnalyzeWord(right.NormalizedText);
+        var hasStandaloneShortWord =
+            IsStandaloneShortWord(left.NormalizedText, leftMetrics)
+            || IsStandaloneShortWord(right.NormalizedText, rightMetrics);
+        if (hasStandaloneShortWord && gap > Math.Clamp(height * 0.06d, 0.45d, 1.15d))
+        {
+            return false;
+        }
+
         var strongMergeHint =
             left.NormalizedText.Length <= 3
             || right.NormalizedText.Length <= 3
@@ -746,6 +754,13 @@ public sealed class ScriptAwareOcrPostProcessor
         => !string.IsNullOrWhiteSpace(text)
            && !LooksLikeProtectedToken(text)
            && text.Any(static character => char.IsLetterOrDigit(character));
+
+    private static bool IsStandaloneShortWord(string text, WordScriptMetrics metrics)
+        => text.Length <= 2
+           && !metrics.MixedScript
+           && !metrics.IsSuspiciousPseudoLatin
+           && !metrics.IsSuspiciousPseudoCyrillic
+           && text.All(static character => char.IsLetterOrDigit(character));
 
     private static RecognizedWord MergeWords(RecognizedWord left, RecognizedWord right)
     {
