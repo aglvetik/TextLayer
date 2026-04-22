@@ -28,7 +28,7 @@ The control center and settings UI can be switched between English and Russian.
 
 ## Normal User Run Path
 
-TextLayer’s canonical app folder is:
+TextLayer's canonical app folder is:
 
 `dist\TextLayer`
 
@@ -100,8 +100,10 @@ dotnet test TextLayer.sln
 - Russian OCR currently relies on Accurate mode because Fast OCR for Russian is not ready for general use yet.
 - Auto OCR language remains experimental.
 - Region capture is single-monitor per capture.
-- No installer is included yet; the repo currently targets a clean unpackaged build first.
+- The first installer setup lives under `installer\` and packages only `dist\TextLayer`.
 
 ## Technical Notes
 
 See [TECHNICAL.md](TECHNICAL.md) for the implementation overview.
+
+See [RELEASE.md](RELEASE.md) for the installer and GitHub Pages release flow.

@@ -17,7 +17,11 @@ namespace TextLayer.App;
 public partial class App : System.Windows.Application
 {
     private const string SingleInstanceMutexName = @"Local\TextLayer.App.SingleInstance";
+    private const string ActivationEventName = @"Local\TextLayer.App.Activate";
     private Mutex? singleInstanceMutex;
+    private EventWaitHandle? activationEvent;
+    private CancellationTokenSource? activationSignalCancellation;
+    private Task? activationSignalTask;
     private bool ownsSingleInstanceMutex;
     private MainWindow? mainWindow;
     private TrayIconService? trayIconService;
@@ -31,15 +35,21 @@ public partial class App : System.Windows.Application
 
         ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
 
+        var launchOptions = LaunchOptions.Parse(e.Args);
+        activationEvent = new EventWaitHandle(initialState: false, EventResetMode.AutoReset, ActivationEventName);
         singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
+            if (!launchOptions.IsWindowsStartup)
+            {
+                SignalExistingInstance();
+            }
+
             Shutdown();
             return;
         }
 
         ownsSingleInstanceMutex = true;
-        var launchOptions = LaunchOptions.Parse(e.Args);
         var logService = new FileLogService();
         var themeService = new ThemeService();
         var fileDialogService = new OpenImageFileDialogService();
@@ -74,6 +84,7 @@ public partial class App : System.Windows.Application
         mainWindow = new MainWindow(mainWindowViewModel);
         MainWindow = mainWindow;
         await mainWindow.InitializeAsync();
+        StartActivationSignalListener();
 
         var overlayWindowManager = new OverlayWindowManager(clipboardService);
         overlayWorkflowCoordinator = new OverlayWorkflowCoordinator(
@@ -143,14 +154,13 @@ public partial class App : System.Windows.Application
         }
         else
         {
-            trayIconService.ShowNotification(
-                UiTextService.Instance["Notification.AppTitle"],
-                UiTextService.Instance["Notification.Startup"]);
+            mainWindow.RestoreFromTray();
         }
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)
     {
+        StopActivationSignalListener();
         overlayWorkflowCoordinator?.CloseOverlay();
         overlayWorkflowCoordinator = null;
         globalHotkeyService?.Dispose();
@@ -166,6 +176,79 @@ public partial class App : System.Windows.Application
         singleInstanceMutex?.Dispose();
         singleInstanceMutex = null;
         base.OnExit(e);
+    }
+
+    private void SignalExistingInstance()
+    {
+        try
+        {
+            activationEvent?.Set();
+        }
+        catch
+        {
+            // If the first instance is already exiting, there is nothing useful to activate.
+        }
+    }
+
+    private void StartActivationSignalListener()
+    {
+        if (activationEvent is null)
+        {
+            return;
+        }
+
+        activationSignalCancellation = new CancellationTokenSource();
+        var token = activationSignalCancellation.Token;
+        var signal = activationEvent;
+        activationSignalTask = Task.Run(() =>
+        {
+            var handles = new WaitHandle[] { signal, token.WaitHandle };
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    var index = WaitHandle.WaitAny(handles);
+                    if (index == 0 && !token.IsCancellationRequested)
+                    {
+                        _ = Dispatcher.BeginInvoke(new Action(ShowMainWindowFromExternalLaunch));
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
+                }
+            }
+        }, token);
+    }
+
+    private void StopActivationSignalListener()
+    {
+        activationSignalCancellation?.Cancel();
+
+        try
+        {
+            activationSignalTask?.Wait(TimeSpan.FromMilliseconds(500));
+        }
+        catch
+        {
+            // Shutdown should continue even if the activation listener is already unwinding.
+        }
+
+        activationSignalTask = null;
+        activationSignalCancellation?.Dispose();
+        activationSignalCancellation = null;
+        activationEvent?.Dispose();
+        activationEvent = null;
+    }
+
+    private void ShowMainWindowFromExternalLaunch()
+    {
+        if (isShuttingDown || Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        mainWindow?.RestoreFromTray();
     }
 
     public Task RequestFullShutdownAsync()

@@ -4,6 +4,7 @@ obj/
 TestResults/
 artifacts/
 dist/
+release/
 *.user
 *.suo
 *.ncrunch*

@@ -144,13 +144,21 @@ public partial class MainWindow : Window
 
     public void RestoreFromTray()
     {
-        Show();
+        if (!IsVisible)
+        {
+            Show();
+        }
+
         if (WindowState == WindowState.Minimized)
         {
             WindowState = WindowState.Normal;
         }
 
         Activate();
+        var previousTopmost = Topmost;
+        Topmost = true;
+        Topmost = previousTopmost;
+        Focus();
     }
 
     public void OpenImageUsingDialog()
