@@ -7,6 +7,7 @@ public sealed class RegistryStartupRegistrationService : IStartupRegistrationSer
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "TextLayer";
+    public const string StartupArgument = "--startup";
 
     public async Task<bool> IsEnabledAsync(string executablePath, CancellationToken cancellationToken)
     {
@@ -16,10 +17,23 @@ public sealed class RegistryStartupRegistrationService : IStartupRegistrationSer
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+                using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
                 var value = key?.GetValue(ValueName) as string;
                 var expectedCommand = CreateCommand(executablePath);
-                return string.Equals(value, expectedCommand, StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    return false;
+                }
+
+                if (string.Equals(value, expectedCommand, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                // If an older TextLayer Run value exists, keep the user's enabled intent but repair
+                // the command so Windows login starts the current published app silently.
+                key?.SetValue(ValueName, expectedCommand);
+                return true;
             }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -55,5 +69,43 @@ public sealed class RegistryStartupRegistrationService : IStartupRegistrationSer
         }
     }
 
-    private static string CreateCommand(string executablePath) => $"\"{executablePath}\"";
+    private static string CreateCommand(string executablePath)
+        => $"\"{ResolveStartupExecutablePath(executablePath)}\" {StartupArgument}";
+
+    private static string ResolveStartupExecutablePath(string executablePath)
+    {
+        var fullPath = Path.GetFullPath(executablePath);
+        var canonicalPublishedPath = TryFindCanonicalPublishedExecutable(fullPath);
+
+        return IsDevelopmentBuildPath(fullPath) && canonicalPublishedPath is not null
+            ? canonicalPublishedPath
+            : fullPath;
+    }
+
+    private static string? TryFindCanonicalPublishedExecutable(string executablePath)
+    {
+        var directory = Directory.GetParent(executablePath);
+        while (directory is not null)
+        {
+            var solutionPath = Path.Combine(directory.FullName, "TextLayer.sln");
+            if (File.Exists(solutionPath))
+            {
+                var canonicalPath = Path.Combine(directory.FullName, "dist", "TextLayer", "TextLayer.exe");
+                return File.Exists(canonicalPath)
+                    ? Path.GetFullPath(canonicalPath)
+                    : null;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private static bool IsDevelopmentBuildPath(string executablePath)
+    {
+        var normalizedPath = executablePath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+        return normalizedPath.Contains($"{Path.DirectorySeparatorChar}src{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)
+            && normalizedPath.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+    }
 }

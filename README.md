@@ -49,6 +49,8 @@ Then launch TextLayer with either:
 
 Settings persist across runs. After launch, the main workflow is `Ctrl+Shift+O` to capture a region from another app and copy text from the overlay.
 
+The optional `Launch at startup` setting registers TextLayer for the current Windows user and starts it silently in the tray after login.
+
 ## Development Run
 
 Requirements:

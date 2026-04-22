@@ -151,6 +151,22 @@ Current behavior:
 
 This avoids the earlier deadlock-prone path where window closing could synchronously wait on async settings persistence.
 
+## Windows Startup Registration
+
+The `Launch at startup` setting uses the current-user Registry Run key:
+
+- key: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
+- value name: `TextLayer`
+- command shape: `"path\to\TextLayer.exe" --startup`
+
+The `--startup` argument is significant. It tells `App.xaml.cs` that Windows launched TextLayer at login, so the app initializes tray/hotkey services silently without showing the control center or a startup balloon.
+
+Startup registration is per-user and does not require administrator rights. When TextLayer is running from a development build under `src\...\bin\...`, registration prefers the canonical published executable at `dist\TextLayer\TextLayer.exe` if that file exists. This prevents a developer or user from accidentally registering an old Debug/Release build path. If TextLayer is already running from a normal published folder, the current executable path is used.
+
+On settings load, an existing stale `TextLayer` Run value is repaired to the expected command. On settings save, the Run key is updated before the JSON settings file is written so the checkbox reflects the real Windows registration state.
+
+TextLayer also uses a local named mutex to avoid duplicate app instances. A second launch exits immediately; the already-running tray instance remains the active app.
+
 ## Selection and Hit Testing
 
 The overlay and the secondary viewer both rely on the same OCR document model.

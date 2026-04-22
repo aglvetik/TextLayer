@@ -56,11 +56,30 @@ public sealed class SettingsManagerTests
         Assert.Equal(OcrMode.Fast, store.SavedSettings!.OcrMode);
     }
 
+    [Fact]
+    public async Task SaveAsync_UpdatesStartupRegistrationBeforePersistingSettings()
+    {
+        var store = new FakeSettingsStore();
+        var startupRegistration = new FakeStartupRegistrationService(store);
+        var manager = new SettingsManager(store, startupRegistration, new FakeLogService());
+
+        await manager.SaveAsync(new AppSettings
+        {
+            LaunchAtStartup = true,
+        }, "TextLayer.exe", CancellationToken.None);
+
+        Assert.True(startupRegistration.RegistrationWasUpdatedBeforeSettingsSave);
+        Assert.True(startupRegistration.Enabled);
+        Assert.True(store.SavedSettings?.LaunchAtStartup);
+    }
+
     private sealed class FakeSettingsStore(AppSettings? initialSettings = null) : ISettingsStore
     {
         public AppSettings CurrentSettings { get; private set; } = initialSettings ?? new AppSettings();
 
         public AppSettings? SavedSettings { get; private set; }
+
+        public bool WasSaved { get; private set; }
 
         public Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
             => Task.FromResult(CurrentSettings);
@@ -69,17 +88,26 @@ public sealed class SettingsManagerTests
         {
             SavedSettings = settings;
             CurrentSettings = settings;
+            WasSaved = true;
             return Task.CompletedTask;
         }
     }
 
-    private sealed class FakeStartupRegistrationService : IStartupRegistrationService
+    private sealed class FakeStartupRegistrationService(FakeSettingsStore? settingsStore = null) : IStartupRegistrationService
     {
+        public bool Enabled { get; private set; }
+
+        public bool RegistrationWasUpdatedBeforeSettingsSave { get; private set; }
+
         public Task<bool> IsEnabledAsync(string executablePath, CancellationToken cancellationToken)
-            => Task.FromResult(false);
+            => Task.FromResult(Enabled);
 
         public Task SetEnabledAsync(string executablePath, bool enabled, CancellationToken cancellationToken)
-            => Task.CompletedTask;
+        {
+            Enabled = enabled;
+            RegistrationWasUpdatedBeforeSettingsSave = settingsStore is null || !settingsStore.WasSaved;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeLogService : ILogService

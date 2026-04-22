@@ -31,7 +31,7 @@ public sealed class SettingsManager(
     public async Task SaveAsync(AppSettings settings, string executablePath, CancellationToken cancellationToken)
     {
         settings = AppSettings.NormalizeOcrBehavior(settings);
-        await settingsStore.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
         await startupRegistrationService.SetEnabledAsync(executablePath, settings.LaunchAtStartup, cancellationToken).ConfigureAwait(false);
+        await settingsStore.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 }

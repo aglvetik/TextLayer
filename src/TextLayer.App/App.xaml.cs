@@ -16,6 +16,9 @@ namespace TextLayer.App;
 
 public partial class App : System.Windows.Application
 {
+    private const string SingleInstanceMutexName = @"Local\TextLayer.App.SingleInstance";
+    private Mutex? singleInstanceMutex;
+    private bool ownsSingleInstanceMutex;
     private MainWindow? mainWindow;
     private TrayIconService? trayIconService;
     private GlobalHotkeyService? globalHotkeyService;
@@ -28,6 +31,15 @@ public partial class App : System.Windows.Application
 
         ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown;
 
+        singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isFirstInstance);
+        if (!isFirstInstance)
+        {
+            Shutdown();
+            return;
+        }
+
+        ownsSingleInstanceMutex = true;
+        var launchOptions = LaunchOptions.Parse(e.Args);
         var logService = new FileLogService();
         var themeService = new ThemeService();
         var fileDialogService = new OpenImageFileDialogService();
@@ -62,10 +74,6 @@ public partial class App : System.Windows.Application
         mainWindow = new MainWindow(mainWindowViewModel);
         MainWindow = mainWindow;
         await mainWindow.InitializeAsync();
-        mainWindow.Opacity = 0d;
-        mainWindow.Show();
-        mainWindow.Hide();
-        mainWindow.Opacity = 1d;
 
         var overlayWindowManager = new OverlayWindowManager(clipboardService);
         overlayWorkflowCoordinator = new OverlayWorkflowCoordinator(
@@ -122,16 +130,23 @@ public partial class App : System.Windows.Application
         globalHotkeyService.Register(ModifierKeys.Control | ModifierKeys.Shift, Key.O, StartRegionCapture);
         logService.Info("Global OCR hotkey registered: Ctrl+Shift+O.");
 
-        if (e.Args.Length > 0 && File.Exists(e.Args[0]))
+        if (launchOptions.ImagePath is not null)
         {
             mainWindow.RestoreFromTray();
-            await mainWindowViewModel.OpenImageFromPathAsync(e.Args[0]);
+            await mainWindowViewModel.OpenImageFromPathAsync(launchOptions.ImagePath);
             return;
         }
 
-        trayIconService.ShowNotification(
-            UiTextService.Instance["Notification.AppTitle"],
-            UiTextService.Instance["Notification.Startup"]);
+        if (launchOptions.IsWindowsStartup)
+        {
+            logService.Info("TextLayer launched from Windows startup in background mode.");
+        }
+        else
+        {
+            trayIconService.ShowNotification(
+                UiTextService.Instance["Notification.AppTitle"],
+                UiTextService.Instance["Notification.Startup"]);
+        }
     }
 
     protected override void OnExit(System.Windows.ExitEventArgs e)
@@ -142,6 +157,14 @@ public partial class App : System.Windows.Application
         globalHotkeyService = null;
         trayIconService?.Dispose();
         trayIconService = null;
+        if (ownsSingleInstanceMutex)
+        {
+            singleInstanceMutex?.ReleaseMutex();
+            ownsSingleInstanceMutex = false;
+        }
+
+        singleInstanceMutex?.Dispose();
+        singleInstanceMutex = null;
         base.OnExit(e);
     }
 
@@ -192,6 +215,31 @@ public partial class App : System.Windows.Application
         finally
         {
             Shutdown();
+        }
+    }
+
+    private sealed record LaunchOptions(bool IsWindowsStartup, string? ImagePath)
+    {
+        public static LaunchOptions Parse(IReadOnlyList<string> args)
+        {
+            var isWindowsStartup = false;
+            string? imagePath = null;
+
+            foreach (var arg in args)
+            {
+                if (string.Equals(arg, RegistryStartupRegistrationService.StartupArgument, StringComparison.OrdinalIgnoreCase))
+                {
+                    isWindowsStartup = true;
+                    continue;
+                }
+
+                if (imagePath is null && File.Exists(arg))
+                {
+                    imagePath = arg;
+                }
+            }
+
+            return new LaunchOptions(isWindowsStartup, imagePath);
         }
     }
 }
