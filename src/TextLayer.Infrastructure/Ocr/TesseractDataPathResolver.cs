@@ -61,7 +61,7 @@ public sealed class TesseractDataPathResolver(string? baseDirectory = null, Func
         => languageMode switch
         {
             OcrLanguageMode.English => ["eng"],
-            OcrLanguageMode.Russian => ["rus"],
-            _ => ["eng", "rus"],
+            OcrLanguageMode.Russian => ["rus", "eng"],
+            _ => ["rus", "eng"],
         };
 }

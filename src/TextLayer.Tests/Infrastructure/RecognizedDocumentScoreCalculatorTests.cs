@@ -42,6 +42,19 @@ public sealed class RecognizedDocumentScoreCalculatorTests
         Assert.True(score.Value > 0);
     }
 
+    [Fact]
+    public void MixedText_PenalizesPseudoTransliteratedRussian()
+    {
+        var clean = CreateDocument("\u041a\u0410\u041a \u042d\u0422\u041e \u0420\u0410\u0411\u041e\u0422\u0410\u0415\u0422 TextLayer OCR");
+        var corrupted = CreateDocument("KAK 3TO PABOTAET TextLayer OCR");
+
+        var cleanScore = calculator.Score(clean, OcrLanguageMode.EnglishRussian);
+        var corruptedScore = calculator.Score(corrupted, OcrLanguageMode.EnglishRussian);
+
+        Assert.True(cleanScore.Value > corruptedScore.Value);
+        Assert.True(corruptedScore.SuspiciousPseudoLatinWordCount >= 2);
+    }
+
     private static RecognizedDocument CreateDocument(string text)
     {
         var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries)

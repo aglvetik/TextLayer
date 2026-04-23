@@ -24,6 +24,11 @@ public sealed class OcrEngineSelector
             return AccurateEngineId;
         }
 
+        if (request.LanguageMode == OcrLanguageMode.EnglishRussian)
+        {
+            return AccurateEngineId;
+        }
+
         var sourceHint = sourcePath.ToLowerInvariant();
         var hasChatFilenameHint = sourceHint.Contains("discord", StringComparison.Ordinal)
             || sourceHint.Contains("telegram", StringComparison.Ordinal)
@@ -57,6 +62,11 @@ public sealed class OcrEngineSelector
         }
 
         if (request.Mode == OcrMode.Accurate)
+        {
+            return [AccurateEngineId];
+        }
+
+        if (request.LanguageMode == OcrLanguageMode.EnglishRussian)
         {
             return [AccurateEngineId];
         }

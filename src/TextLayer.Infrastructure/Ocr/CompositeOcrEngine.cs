@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using TextLayer.Application.Abstractions;
 using TextLayer.Application.Models;
 using TextLayer.Domain.Models;
@@ -12,10 +13,18 @@ public sealed class CompositeOcrEngine(
     ILogService logService) : IOcrEngine
 {
     private readonly RecognizedDocumentScoreCalculator scoreCalculator = new();
+    private readonly MixedLanguageDocumentFusion mixedLanguageFusion = new();
+    private readonly ScriptAwareOcrPostProcessor postProcessor = new();
 
     public async Task<RecognizedDocument> RecognizeAsync(string sourcePath, OcrRequestOptions request, CancellationToken cancellationToken)
     {
         var analysis = await imageAnalyzer.AnalyzeAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+        if (request.LanguageMode == OcrLanguageMode.EnglishRussian
+            && request.Mode == OcrMode.Accurate)
+        {
+            return await RecognizeMixedLanguageAsync(sourcePath, request, cancellationToken).ConfigureAwait(false);
+        }
+
         if (request.LanguageMode == OcrLanguageMode.Auto)
         {
             return await RecognizeWithAutoLanguageAsync(sourcePath, request, analysis, cancellationToken).ConfigureAwait(false);
@@ -44,6 +53,78 @@ public sealed class CompositeOcrEngine(
             $"OCR mode '{request.Mode}' selected engine '{candidate.EngineId}' with language '{candidate.LanguageMode}' for {Path.GetFileName(sourcePath)}. Score: {candidate.Score.Value:F1}");
         return candidate.Document;
     }
+
+    private async Task<RecognizedDocument> RecognizeMixedLanguageAsync(
+        string sourcePath,
+        OcrRequestOptions request,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var branches = new List<MixedLanguageRecognitionBranch>();
+
+        foreach (var (languageMode, branchMode, engine) in GetMixedLanguageBranchPlan(request.Mode))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var branchRequest = new OcrRequestOptions(branchMode, languageMode);
+                var branchDocument = await engine
+                    .RecognizeAsync(sourcePath, branchRequest, cancellationToken)
+                    .ConfigureAwait(false);
+
+                branches.Add(new MixedLanguageRecognitionBranch(branchDocument, languageMode));
+            }
+            catch (TesseractConfigurationException exception)
+            {
+                logService.Warn($"Mixed OCR branch '{languageMode}' is unavailable. {exception.Message}");
+            }
+        }
+
+        if (branches.Count == 0)
+        {
+            throw new InvalidOperationException("TextLayer could not recognize mixed English + Russian text from the captured image.");
+        }
+
+        stopwatch.Stop();
+        var engineId = request.Mode == OcrMode.Fast
+            ? OcrEngineSelector.FastEngineId
+            : OcrEngineSelector.AccurateEngineId;
+        var fusedDocument = mixedLanguageFusion.Fuse(branches, engineId, stopwatch.ElapsedMilliseconds);
+        var filteredDocument = postProcessor.Process(
+                fusedDocument,
+                OcrLanguageMode.EnglishRussian,
+                request.Mode == OcrMode.Accurate
+                    ? RecognizedDocumentNoiseFilter.NoiseFilterProfile.MaximumCoverage
+                    : RecognizedDocumentNoiseFilter.NoiseFilterProfile.Standard)
+            .Document;
+
+        var finalDocument = filteredDocument with
+        {
+            RecognitionDurationMs = stopwatch.ElapsedMilliseconds,
+            OcrEngineId = engineId,
+            LanguageHint = request.Mode == OcrMode.Fast
+                ? "eng+rus fused fast"
+                : "eng+rus fused accurate",
+        };
+        var score = scoreCalculator.Score(finalDocument, OcrLanguageMode.EnglishRussian);
+        logService.Info(
+            $"OCR mixed language fused {branches.Count} branches with engine '{engineId}' for {Path.GetFileName(sourcePath)}. Score: {score.Value:F1}");
+        return finalDocument;
+    }
+
+    private IReadOnlyList<(OcrLanguageMode LanguageMode, OcrMode BranchMode, IOcrEngine Engine)> GetMixedLanguageBranchPlan(OcrMode mode)
+        => mode == OcrMode.Fast
+            ?
+            [
+                (OcrLanguageMode.English, OcrMode.Fast, fastEngine),
+                (OcrLanguageMode.Russian, OcrMode.Fast, fastEngine),
+            ]
+            :
+            [
+                (OcrLanguageMode.English, OcrMode.Fast, accurateEngine),
+                (OcrLanguageMode.Russian, OcrMode.Accurate, accurateEngine),
+                (OcrLanguageMode.EnglishRussian, OcrMode.Accurate, accurateEngine),
+            ];
 
     private async Task<RecognizedDocument> RecognizeWithAutoLanguageAsync(
         string sourcePath,
@@ -228,13 +309,25 @@ public sealed class CompositeOcrEngine(
         }
 
         var bestCandidate = evaluatedCandidates.OrderByDescending(candidate => candidate.Score.Value).First();
+        var bilingualCandidate = evaluatedCandidates
+            .Where(candidate =>
+                candidate.LanguageMode == OcrLanguageMode.EnglishRussian
+                && candidate.Score.LatinCharacterCount >= 2
+                && candidate.Score.CyrillicCharacterCount >= 2)
+            .OrderByDescending(candidate => candidate.Score.Value)
+            .FirstOrDefault();
+
+        if (bilingualCandidate is not null
+            && bestCandidate.LanguageMode != OcrLanguageMode.EnglishRussian
+            && ShouldPreferMixedLanguageCandidate(bestCandidate, bilingualCandidate))
+        {
+            return bilingualCandidate;
+        }
+
         var requestedCandidate = evaluatedCandidates.FirstOrDefault(candidate => candidate.LanguageMode == originalRequest.LanguageMode);
-        if (engineId != OcrEngineSelector.AccurateEngineId
-            && requestedCandidate is not null
+        if (requestedCandidate is not null
             && bestCandidate.LanguageMode != originalRequest.LanguageMode
-            && requestedCandidate.Score.Value + 8d >= bestCandidate.Score.Value
-            && requestedCandidate.Score.SuspiciousPseudoLatinWordCount <= bestCandidate.Score.SuspiciousPseudoLatinWordCount
-            && requestedCandidate.Score.SuspiciousPseudoCyrillicWordCount <= bestCandidate.Score.SuspiciousPseudoCyrillicWordCount)
+            && ShouldPreferRequestedLanguageCandidate(originalRequest, requestedCandidate, bestCandidate))
         {
             return requestedCandidate;
         }
@@ -245,10 +338,12 @@ public sealed class CompositeOcrEngine(
     private static IReadOnlyList<OcrLanguageMode> GetLanguageEvaluationOrder(string engineId, OcrRequestOptions request)
         => (engineId, request.Mode, request.LanguageMode) switch
         {
+            (OcrEngineSelector.FastEngineId, OcrMode.Fast, OcrLanguageMode.EnglishRussian)
+                => [OcrLanguageMode.EnglishRussian],
             (OcrEngineSelector.AccurateEngineId, OcrMode.Accurate, OcrLanguageMode.Russian)
-                => [OcrLanguageMode.Russian, OcrLanguageMode.EnglishRussian],
+                => [OcrLanguageMode.Russian],
             (OcrEngineSelector.AccurateEngineId, OcrMode.Accurate, OcrLanguageMode.English)
-                => [OcrLanguageMode.English, OcrLanguageMode.EnglishRussian],
+                => [OcrLanguageMode.English],
             (OcrEngineSelector.AccurateEngineId, _, OcrLanguageMode.EnglishRussian)
                 => [OcrLanguageMode.EnglishRussian, OcrLanguageMode.Russian, OcrLanguageMode.English],
             (_, _, OcrLanguageMode.Russian) => [OcrLanguageMode.Russian],
@@ -256,6 +351,40 @@ public sealed class CompositeOcrEngine(
             (_, _, OcrLanguageMode.English) => [OcrLanguageMode.English],
             _ => [request.LanguageMode],
         };
+
+    private static bool ShouldPreferRequestedLanguageCandidate(
+        OcrRequestOptions originalRequest,
+        ScoredRecognitionCandidate requestedCandidate,
+        ScoredRecognitionCandidate bestCandidate)
+    {
+        var scoreGap = bestCandidate.Score.Value - requestedCandidate.Score.Value;
+        var requestedIsNoisier =
+            requestedCandidate.Score.SuspiciousPseudoLatinWordCount > bestCandidate.Score.SuspiciousPseudoLatinWordCount + 1
+            || requestedCandidate.Score.SuspiciousPseudoCyrillicWordCount > bestCandidate.Score.SuspiciousPseudoCyrillicWordCount + 1
+            || requestedCandidate.Score.MixedScriptWordCount > bestCandidate.Score.MixedScriptWordCount + 2;
+
+        if (originalRequest.LanguageMode == OcrLanguageMode.EnglishRussian)
+        {
+            var requestedContainsMixedEvidence =
+                requestedCandidate.Score.SuggestedLanguageMode == OcrLanguageMode.EnglishRussian
+                || requestedCandidate.Score.DominantScript == ScriptDominance.Mixed
+                || (requestedCandidate.Score.LatinCharacterCount >= 3 && requestedCandidate.Score.CyrillicCharacterCount >= 3);
+
+            return requestedContainsMixedEvidence
+                ? scoreGap <= 38d || !requestedIsNoisier
+                : scoreGap <= 18d && !requestedIsNoisier;
+        }
+
+        if (bestCandidate.LanguageMode == OcrLanguageMode.EnglishRussian
+            && ShouldPreferMixedLanguageCandidate(requestedCandidate, bestCandidate))
+        {
+            return false;
+        }
+
+        var tolerance = originalRequest.Mode == OcrMode.Accurate ? 18d : 8d;
+        return scoreGap <= tolerance
+            && !requestedIsNoisier;
+    }
 
     private static bool ShouldPreferMixedLanguageCandidate(
         ScoredRecognitionCandidate bestCandidate,

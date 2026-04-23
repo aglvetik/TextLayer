@@ -7,6 +7,41 @@ namespace TextLayer.Tests.Application;
 public sealed class SettingsManagerTests
 {
     [Fact]
+    public void Defaults_UseEnglishFast()
+    {
+        var settings = new AppSettings();
+
+        Assert.Equal(OcrLanguageMode.English, settings.OcrLanguageMode);
+        Assert.Equal(OcrMode.Fast, settings.OcrMode);
+    }
+
+    [Fact]
+    public void NormalizeOcrBehavior_DemotesExperimentalAutoToEnglishFast()
+    {
+        var settings = AppSettings.NormalizeOcrBehavior(new AppSettings
+        {
+            OcrLanguageMode = OcrLanguageMode.Auto,
+            OcrMode = OcrMode.Auto,
+        });
+
+        Assert.Equal(OcrLanguageMode.English, settings.OcrLanguageMode);
+        Assert.Equal(OcrMode.Fast, settings.OcrMode);
+    }
+
+    [Fact]
+    public void NormalizeOcrBehavior_MapsLegacyMixedToRussianAccurate()
+    {
+        var settings = AppSettings.NormalizeOcrBehavior(new AppSettings
+        {
+            OcrLanguageMode = OcrLanguageMode.EnglishRussian,
+            OcrMode = OcrMode.Fast,
+        });
+
+        Assert.Equal(OcrLanguageMode.Russian, settings.OcrLanguageMode);
+        Assert.Equal(OcrMode.Accurate, settings.OcrMode);
+    }
+
+    [Fact]
     public async Task LoadAsync_NormalizesRussianFastToAccurate()
     {
         var store = new FakeSettingsStore(new AppSettings

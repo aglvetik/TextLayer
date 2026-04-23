@@ -6,6 +6,14 @@ namespace TextLayer.Tests.Infrastructure;
 public sealed class TesseractDataPathResolverTests
 {
     [Fact]
+    public void RussianLanguage_UsesRusAndEngDataFiles()
+    {
+        var languages = TesseractDataPathResolver.GetLanguageCodes(OcrLanguageMode.Russian);
+
+        Assert.Equal(["rus", "eng"], languages);
+    }
+
+    [Fact]
     public void Resolve_ThrowsFriendlyError_WhenLanguageDataIsMissing()
     {
         var baseDirectory = Path.Combine(Path.GetTempPath(), "TextLayerTests", Guid.NewGuid().ToString("N"));

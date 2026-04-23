@@ -27,7 +27,10 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         {
             var stopwatch = Stopwatch.StartNew();
             var analysis = await new OcrImageAnalyzer().AnalyzeAsync(sourcePath, cancellationToken).ConfigureAwait(false);
-            var plan = preprocessingPlanner.CreatePlan(analysis, analysis.PixelWidth, analysis.PixelHeight);
+            var plan = AdjustPlanForLanguage(
+                preprocessingPlanner.CreatePlan(analysis, analysis.PixelWidth, analysis.PixelHeight),
+                request.LanguageMode,
+                analysis);
             var raster = await LoadRasterAsync(sourcePath, plan, cancellationToken).ConfigureAwait(false);
             var dataPath = dataPathResolver.Resolve(request.LanguageMode);
 
@@ -58,6 +61,32 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         }
     }
 
+    private static TesseractPreprocessingPlan AdjustPlanForLanguage(
+        TesseractPreprocessingPlan plan,
+        OcrLanguageMode languageMode,
+        OcrImageAnalysis analysis)
+        => languageMode switch
+        {
+            OcrLanguageMode.EnglishRussian => CreateCyrillicFriendlyPlan(plan, analysis),
+            OcrLanguageMode.Russian => CreateCyrillicFriendlyPlan(plan, analysis),
+            _ => plan,
+        };
+
+    private static TesseractPreprocessingPlan CreateCyrillicFriendlyPlan(
+        TesseractPreprocessingPlan plan,
+        OcrImageAnalysis analysis)
+        => plan with
+        {
+            ScaleFactor = Math.Min(plan.ScaleFactor, analysis.LikelySmallText ? 1.75d : 1.45d),
+            UseNeutralGrayscalePass = true,
+            UseBinarizedPass = analysis.IsLowContrast && !analysis.IsDarkBackground,
+            UseDarkUiPass = analysis.IsDarkBackground,
+            UseLowContrastPass = !analysis.IsDarkBackground && analysis.IsLowContrast,
+            UseSmallTextPass = analysis.LikelySmallText && !analysis.IsDarkBackground,
+            UseAccentTextPass = analysis.IsDarkBackground && (analysis.IsLowContrast || analysis.LikelyChatScreenshot || analysis.LikelySmallText),
+            UseInvertedAccentPass = false,
+        };
+
     private static RecognizedDocument RecognizeCore(
         string sourcePath,
         TesseractRaster raster,
@@ -73,27 +102,17 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         basePix.XRes = 300;
         basePix.YRes = 300;
 
-        var candidates = BuildCandidates(basePix, plan, raster.AccentPngBytes);
+        var candidates = BuildCandidates(basePix, plan, raster.AccentPngBytes, request.LanguageMode);
         try
         {
             var scoredCandidates = new List<TesseractDocumentCandidate>(candidates.Count);
             foreach (var candidate in candidates)
             {
-                using (var page = engine.Process(candidate.Image, PageSegMode.Auto))
+                foreach (var pageSegMode in GetPageSegModes(candidate, request, plan))
                 {
-                    scoredCandidates.Add(MapPage(sourcePath, raster, request, page));
-                }
-
-                if (request.Mode == OcrMode.Accurate)
-                {
-                    using (var sparsePage = engine.Process(candidate.Image, PageSegMode.SparseText))
+                    using (var page = engine.Process(candidate.Image, pageSegMode))
                     {
-                        scoredCandidates.Add(MapPage(sourcePath, raster, request, sparsePage));
-                    }
-
-                    using (var singleBlockPage = engine.Process(candidate.Image, PageSegMode.SingleBlock))
-                    {
-                        scoredCandidates.Add(MapPage(sourcePath, raster, request, singleBlockPage));
+                        scoredCandidates.Add(MapPage(sourcePath, raster, request, page));
                     }
                 }
             }
@@ -120,7 +139,7 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
                 .ToArray();
 
             return request.Mode == OcrMode.Accurate
-                ? MergeCoverageCandidates(orderedCandidates)
+                ? MergeCoverageCandidates(orderedCandidates, request.LanguageMode)
                 : orderedCandidates[0];
         }
         finally
@@ -132,18 +151,79 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         }
     }
 
-    private static List<TesseractImageCandidate> BuildCandidates(Pix basePix, TesseractPreprocessingPlan plan, byte[]? accentPngBytes)
+    private static IReadOnlyList<PageSegMode> GetPageSegModes(
+        TesseractImageCandidate candidate,
+        OcrRequestOptions request,
+        TesseractPreprocessingPlan plan)
     {
+        if (request.Mode != OcrMode.Accurate)
+        {
+            return [PageSegMode.Auto];
+        }
+
+        if (request.LanguageMode is OcrLanguageMode.Russian or OcrLanguageMode.EnglishRussian)
+        {
+            return candidate.Name is "base" or "accent-base"
+                ? [PageSegMode.Auto, PageSegMode.SparseText]
+                : [PageSegMode.Auto];
+        }
+
+        var modes = new List<PageSegMode> { PageSegMode.Auto };
+        var shouldUseSparse =
+            candidate.Name is "base" or "grayscale" or "dark-ui-grayscale" or "accent-base" or "accent-grayscale"
+            || (request.LanguageMode == OcrLanguageMode.EnglishRussian && candidate.Name is "dark-ui" or "accent-dark-ui")
+            || (plan.UseSmallTextPass && candidate.Name == "small-text");
+
+        if (shouldUseSparse)
+        {
+            modes.Add(PageSegMode.SparseText);
+        }
+
+        var shouldUseSingleBlock =
+            request.LanguageMode != OcrLanguageMode.EnglishRussian
+            && !plan.UseSmallTextPass
+            && candidate.Name is "base" or "grayscale";
+
+        if (shouldUseSingleBlock)
+        {
+            modes.Add(PageSegMode.SingleBlock);
+        }
+
+        return modes;
+    }
+
+    private static List<TesseractImageCandidate> BuildCandidates(
+        Pix basePix,
+        TesseractPreprocessingPlan plan,
+        byte[]? accentPngBytes,
+        OcrLanguageMode languageMode)
+    {
+        var preferGentleCyrillicPasses = languageMode is OcrLanguageMode.Russian or OcrLanguageMode.EnglishRussian;
         var candidates = new List<TesseractImageCandidate>
         {
             new("base", basePix.Clone()),
         };
 
         using var grayPreview = basePix.ConvertRGBToGray();
+        if (plan.UseNeutralGrayscalePass)
+        {
+            candidates.Add(new("grayscale", grayPreview.Clone()));
+        }
+
+        if (plan.UseBinarizedPass && !preferGentleCyrillicPasses)
+        {
+            candidates.Add(new("binary", grayPreview.BinarizeSauvola(31, 0.26f, true)));
+        }
+
         if (plan.UseDarkUiPass)
         {
             var inverted = grayPreview.Invert();
-            candidates.Add(new("dark-ui", inverted.BinarizeSauvola(25, 0.32f, true)));
+            candidates.Add(new("dark-ui-grayscale", inverted.Clone()));
+            if (!preferGentleCyrillicPasses)
+            {
+                candidates.Add(new("dark-ui", inverted.BinarizeSauvola(25, 0.32f, true)));
+            }
+
             inverted.Dispose();
         }
         else if (plan.UseLowContrastPass)
@@ -153,24 +233,34 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
 
         if (plan.UseSmallTextPass)
         {
-            candidates.Add(new("small-text", grayPreview.Scale(1.1f, 1.1f)));
+            var scale = preferGentleCyrillicPasses ? 1.06f : 1.1f;
+            candidates.Add(new("small-text", grayPreview.Scale(scale, scale)));
         }
 
-        if (accentPngBytes is { Length: > 0 })
+        if (accentPngBytes is { Length: > 0 } && plan.UseAccentTextPass)
         {
             using var accentBasePix = Pix.LoadFromMemory(accentPngBytes);
             candidates.Add(new("accent-base", accentBasePix.Clone()));
 
-            using var accentGrayPreview = accentBasePix.ConvertRGBToGray();
-            if (plan.UseDarkUiPass)
+            if (!preferGentleCyrillicPasses)
             {
-                var inverted = accentGrayPreview.Invert();
-                candidates.Add(new("accent-dark-ui", inverted.BinarizeSauvola(25, 0.3f, true)));
-                inverted.Dispose();
-            }
-            else if (plan.UseLowContrastPass || plan.UseSmallTextPass)
-            {
-                candidates.Add(new("accent-low-contrast", accentGrayPreview.BinarizeSauvola(25, 0.28f, true)));
+                using var accentGrayPreview = accentBasePix.ConvertRGBToGray();
+                candidates.Add(new("accent-grayscale", accentGrayPreview.Clone()));
+                if (plan.UseDarkUiPass)
+                {
+                    var inverted = accentGrayPreview.Invert();
+                    if (plan.UseInvertedAccentPass)
+                    {
+                        candidates.Add(new("accent-inverted", inverted.Clone()));
+                    }
+
+                    candidates.Add(new("accent-dark-ui", inverted.BinarizeSauvola(25, 0.3f, true)));
+                    inverted.Dispose();
+                }
+                else if (plan.UseLowContrastPass || plan.UseSmallTextPass)
+                {
+                    candidates.Add(new("accent-low-contrast", accentGrayPreview.BinarizeSauvola(25, 0.28f, true)));
+                }
             }
         }
 
@@ -231,7 +321,7 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         FinalizeCurrentLine(lines, currentLineWords, currentLineWordIds);
 
         var fullText = page.GetText()?.Trim() ?? string.Empty;
-        var score = GetPageScore(fullText, words.Count, lines.Count, page.GetMeanConfidence(), request.LanguageMode);
+        var score = GetPageScore(fullText, words, lines.Count, page.GetMeanConfidence(), request.LanguageMode);
 
         return new TesseractDocumentCandidate(
             new RecognizedDocument(
@@ -288,19 +378,33 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
 
     private static double GetPageScore(
         string text,
-        int wordCount,
+        IReadOnlyList<RecognizedWord> words,
         int lineCount,
         float meanConfidence,
         OcrLanguageMode languageMode)
     {
+        var wordCount = words.Count;
         var nonWhitespaceCount = text.Count(static character => !char.IsWhiteSpace(character));
+        var alphaNumericCount = text.Count(static character => char.IsLetterOrDigit(character));
+        var suspiciousSymbolCount = text.Count(static character =>
+            !char.IsWhiteSpace(character)
+            && !char.IsLetterOrDigit(character)
+            && character is not '.' and not ',' and not ':' and not ';' and not '!' and not '?'
+            && character is not '(' and not ')' and not '[' and not ']' and not '{' and not '}'
+            && character is not '-' and not '_' and not '/' and not '\\' and not '"' and not '\'' and not '+'
+            && character is not '#' and not '@' and not '%' and not '&' and not '*' and not '=');
         var hasLatin = text.Any(static character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
         var hasCyrillic = text.Any(static character => character is >= '\u0400' and <= '\u04FF');
+        var alphaRatio = nonWhitespaceCount == 0 ? 0d : alphaNumericCount / (double)nonWhitespaceCount;
+        var protectedTokenBonus = CountProtectedTokenHits(text) * 5d;
+        var mixedCorruptionPenalty = words.Count(word => IsMixedCorruptedToken(word.NormalizedText)) * 13d;
+        var cleanCyrillicBonus = words.Count(word => IsCleanCyrillicToken(word.NormalizedText))
+            * (languageMode is OcrLanguageMode.Russian or OcrLanguageMode.EnglishRussian ? 1.75d : 0.35d);
         var languageBonus = languageMode switch
         {
-            OcrLanguageMode.Russian when hasCyrillic => 20d,
+            OcrLanguageMode.Russian when hasCyrillic => 26d,
             OcrLanguageMode.English when hasLatin => 20d,
-            OcrLanguageMode.EnglishRussian when hasLatin && hasCyrillic => 30d,
+            OcrLanguageMode.EnglishRussian when hasLatin && hasCyrillic => 32d,
             _ => 0d,
         };
 
@@ -308,10 +412,46 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
             + (lineCount * 5d)
             + (nonWhitespaceCount * 0.85d)
             + (meanConfidence * 1.15d)
-            + languageBonus;
+            + (alphaRatio * 20d)
+            + languageBonus
+            + protectedTokenBonus
+            + cleanCyrillicBonus
+            - mixedCorruptionPenalty
+            - (suspiciousSymbolCount * 1.7d);
     }
 
-    private static RecognizedDocument MergeCoverageCandidates(IReadOnlyList<RecognizedDocument> candidates)
+    private static int CountProtectedTokenHits(string text)
+    {
+        var hits = 0;
+        var tokens = new[]
+        {
+            "TextLayer",
+            "OCR",
+            "Windows",
+            "Tesseract",
+            "GitHub",
+            "Releases",
+            "Download",
+            "Setup",
+            "Ctrl+Shift+O",
+            "Esc",
+            ".exe",
+        };
+
+        foreach (var token in tokens)
+        {
+            if (text.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                hits++;
+            }
+        }
+
+        return hits;
+    }
+
+    private static RecognizedDocument MergeCoverageCandidates(
+        IReadOnlyList<RecognizedDocument> candidates,
+        OcrLanguageMode languageMode)
     {
         if (candidates.Count == 0)
         {
@@ -336,7 +476,7 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
                 var existingIndex = FindExistingWordIndex(mergedWords, word);
                 if (existingIndex >= 0)
                 {
-                    var preferred = ChoosePreferredWord(mergedWords[existingIndex], word);
+                    var preferred = ChoosePreferredWord(mergedWords[existingIndex], word, languageMode);
                     mergedWords[existingIndex] = preferred;
                     continue;
                 }
@@ -367,6 +507,12 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
         var verticalOverlap = Math.Max(0d, Math.Min(left.BoundingRect.Bottom, right.BoundingRect.Bottom) - Math.Max(left.BoundingRect.Top, right.BoundingRect.Top));
         var overlapArea = horizontalOverlap * verticalOverlap;
         var minArea = Math.Max(1d, Math.Min(left.BoundingRect.Width * left.BoundingRect.Height, right.BoundingRect.Width * right.BoundingRect.Height));
+        var sameText = LooksLikeSameToken(left.NormalizedText, right.NormalizedText);
+        if (sameText && overlapArea / minArea >= 0.18d)
+        {
+            return true;
+        }
+
         if (overlapArea / minArea >= 0.34d)
         {
             return true;
@@ -379,26 +525,125 @@ public sealed class TesseractOcrEngine(TesseractDataPathResolver dataPathResolve
 
         var horizontalDistance = Math.Abs(leftCenterX - rightCenterX);
         var verticalDistance = Math.Abs(leftCenterY - rightCenterY);
-        return horizontalDistance <= Math.Clamp(Math.Max(left.BoundingRect.Width, right.BoundingRect.Width) * 0.42d, 4d, 18d)
+        return horizontalDistance <= Math.Clamp(Math.Max(left.BoundingRect.Width, right.BoundingRect.Width) * (sameText ? 0.62d : 0.42d), 4d, sameText ? 28d : 18d)
             && verticalDistance <= Math.Clamp(Math.Max(left.BoundingRect.Height, right.BoundingRect.Height) * 0.55d, 3d, 14d);
     }
 
-    private static RecognizedWord ChoosePreferredWord(RecognizedWord existing, RecognizedWord candidate)
+    private static bool LooksLikeSameToken(string left, string right)
     {
-        var existingScore = GetWordPreferenceScore(existing);
-        var candidateScore = GetWordPreferenceScore(candidate);
+        var normalizedLeft = NormalizeForTokenComparison(left);
+        var normalizedRight = NormalizeForTokenComparison(right);
+        if (normalizedLeft.Length == 0 || normalizedRight.Length == 0)
+        {
+            return false;
+        }
+
+        if (string.Equals(normalizedLeft, normalizedRight, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var minLength = Math.Min(normalizedLeft.Length, normalizedRight.Length);
+        var maxLength = Math.Max(normalizedLeft.Length, normalizedRight.Length);
+        return minLength >= 4
+            && maxLength - minLength <= 2
+            && (normalizedLeft.Contains(normalizedRight, StringComparison.OrdinalIgnoreCase)
+                || normalizedRight.Contains(normalizedLeft, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeForTokenComparison(string text)
+        => new(text
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+
+    private static RecognizedWord ChoosePreferredWord(
+        RecognizedWord existing,
+        RecognizedWord candidate,
+        OcrLanguageMode languageMode)
+    {
+        var existingScore = GetWordPreferenceScore(existing, languageMode);
+        var candidateScore = GetWordPreferenceScore(candidate, languageMode);
         return candidateScore > existingScore ? candidate : existing;
     }
 
-    private static double GetWordPreferenceScore(RecognizedWord word)
+    private static double GetWordPreferenceScore(RecognizedWord word, OcrLanguageMode languageMode)
     {
         var alphaNumericCount = word.NormalizedText.Count(static character => char.IsLetterOrDigit(character));
         var symbolCount = word.NormalizedText.Count(static character => !char.IsWhiteSpace(character) && !char.IsLetterOrDigit(character));
+        var protectedTokenBonus = CountProtectedTokenHits(word.NormalizedText) * 12d;
+        var cyrillicBonus =
+            languageMode is OcrLanguageMode.Russian or OcrLanguageMode.EnglishRussian
+            && word.NormalizedText.Any(static character => character is >= '\u0400' and <= '\u04FF')
+                ? 4d
+                : 0d;
+        var mixedCorruptionPenalty = IsMixedCorruptedToken(word.NormalizedText) ? 18d : 0d;
         return (alphaNumericCount * 5d)
             + (word.NormalizedText.Length * 1.4d)
             - (symbolCount * 0.6d)
-            + ((word.Confidence ?? 70d) * 0.08d);
+            + ((word.Confidence ?? 70d) * 0.08d)
+            + protectedTokenBonus
+            + cyrillicBonus
+            - mixedCorruptionPenalty;
     }
+
+    private static bool IsMixedCorruptedToken(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || LooksTechnicalToken(text))
+        {
+            return false;
+        }
+
+        var hasLatin = false;
+        var hasCyrillic = false;
+        var symbolCount = 0;
+        foreach (var character in text)
+        {
+            if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                hasLatin = true;
+            }
+            else if (character is >= '\u0400' and <= '\u04FF')
+            {
+                hasCyrillic = true;
+            }
+            else if (!char.IsWhiteSpace(character) && !char.IsDigit(character) && !char.IsPunctuation(character))
+            {
+                symbolCount++;
+            }
+        }
+
+        return hasLatin && hasCyrillic && (text.Length >= 4 || symbolCount > 0);
+    }
+
+    private static bool IsCleanCyrillicToken(string text)
+    {
+        var hasCyrillic = false;
+        foreach (var character in text)
+        {
+            if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                return false;
+            }
+
+            if (character is >= '\u0400' and <= '\u04FF')
+            {
+                hasCyrillic = true;
+            }
+        }
+
+        return hasCyrillic;
+    }
+
+    private static bool LooksTechnicalToken(string text)
+        => text.Contains("://", StringComparison.Ordinal)
+           || text.Contains("www.", StringComparison.OrdinalIgnoreCase)
+           || text.Contains(".exe", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Ctrl", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("TextLayer", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Windows", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("GitHub", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Tesseract", StringComparison.OrdinalIgnoreCase);
 
     private static RecognizedDocument RebuildDocument(RecognizedDocument template, IReadOnlyList<RecognizedWord> sourceWords)
     {

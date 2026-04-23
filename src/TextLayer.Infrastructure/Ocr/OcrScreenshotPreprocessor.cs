@@ -5,6 +5,9 @@ namespace TextLayer.Infrastructure.Ocr;
 
 internal static class OcrScreenshotPreprocessor
 {
+    public static SoftwareBitmap CreateLineDetectionBitmap(SoftwareBitmap source, bool invertForDarkUi)
+        => CreateAccentAwareGrayscaleBitmap(source, invertForDarkUi);
+
     public static SoftwareBitmap CreateAccentAwareGrayscaleBitmap(SoftwareBitmap source, bool invertForDarkUi)
     {
         var pixels = new byte[source.PixelWidth * source.PixelHeight * 4];

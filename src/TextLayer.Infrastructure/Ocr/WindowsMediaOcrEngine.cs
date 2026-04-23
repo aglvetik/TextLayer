@@ -15,6 +15,7 @@ namespace TextLayer.Infrastructure.Ocr;
 public sealed class WindowsMediaOcrEngine : IOcrEngine
 {
     private readonly ScriptAwareOcrPostProcessor postProcessor = new();
+    private readonly WindowsMixedFastOcrPipeline mixedFastPipeline = new();
 
     public async Task<RecognizedDocument> RecognizeAsync(string sourcePath, OcrRequestOptions request, CancellationToken cancellationToken)
     {
@@ -53,8 +54,24 @@ public sealed class WindowsMediaOcrEngine : IOcrEngine
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var engine = CreateEngine(request.LanguageMode);
             var tone = AnalyzeBitmapTone(softwareBitmap);
+            if (request.Mode == OcrMode.Fast && request.LanguageMode == OcrLanguageMode.EnglishRussian)
+            {
+                var mixedDocument = await mixedFastPipeline.RecognizeAsync(
+                        sourcePath,
+                        softwareBitmap,
+                        orientedWidth,
+                        orientedHeight,
+                        tone.IsDarkBackground,
+                        preferEnhancedBitmap: tone.IsDarkBackground || tone.ContrastRange < 165,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                stopwatch.Stop();
+                return mixedDocument with { RecognitionDurationMs = stopwatch.ElapsedMilliseconds };
+            }
+
+            var engine = CreateEngine(request.LanguageMode);
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken).ConfigureAwait(false);
 
             if (ShouldTryEnhancedPass(tone, result))

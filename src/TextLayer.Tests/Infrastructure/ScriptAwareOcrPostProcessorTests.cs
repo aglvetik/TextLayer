@@ -98,6 +98,42 @@ public sealed class ScriptAwareOcrPostProcessorTests
         Assert.Equal("\u043c\u0438\u0440", processed.Words[1].Text);
     }
 
+    [Fact]
+    public void Process_RepairsProtectedTechnicalTokens()
+    {
+        var document = CreateDocument(
+            new[]
+            {
+                CreateWord("\u0422extLayer", 0, 0, new RectD(12, 18, 82, 20)),
+                CreateWord("\u041E\u0421K", 1, 0, new RectD(102, 18, 34, 20)),
+                CreateWord("Теssеract.exe", 2, 0, new RectD(144, 18, 110, 20)),
+                CreateWord("Ctrl+Shift+0", 3, 0, new RectD(262, 18, 96, 20)),
+            });
+
+        var processed = postProcessor.Process(document, OcrLanguageMode.EnglishRussian).Document;
+
+        Assert.Equal("TextLayer", processed.Words[0].Text);
+        Assert.Equal("OCR", processed.Words[1].Text);
+        Assert.Equal("Tesseract.exe", processed.Words[2].Text);
+        Assert.Equal("Ctrl+Shift+O", processed.Words[3].Text);
+    }
+
+    [Fact]
+    public void Process_RepairsInstallerAndUrlLikeTechnicalTokens_InRussianContext()
+    {
+        var document = CreateDocument(
+            new[]
+            {
+                CreateWord("Texё1ayer-Setup-0.1.0.ехе", 0, 0, new RectD(12, 18, 164, 20)),
+                CreateWord("gіthub.com/TextLayer", 1, 0, new RectD(184, 18, 150, 20)),
+            });
+
+        var processed = postProcessor.Process(document, OcrLanguageMode.Russian).Document;
+
+        Assert.Equal("TextLayer-Setup-0.1.0.exe", processed.Words[0].Text);
+        Assert.Equal("github.com/TextLayer", processed.Words[1].Text);
+    }
+
     private static RecognizedDocument CreateDocument(params IReadOnlyList<RecognizedWord>[] lines)
     {
         var words = new List<RecognizedWord>();

@@ -38,7 +38,7 @@ public sealed class MainWindowViewModel : ObservableObject
     private AppSettings currentSettings = new();
     private bool isOverlayEnabled = true;
     private bool closeToTrayOnClose;
-    private OcrModeOption selectedQuickOcrMode = new("OcrMode.Auto", OcrMode.Auto);
+    private OcrModeOption selectedQuickOcrMode = new("OcrMode.Fast", OcrMode.Fast);
     private OcrLanguageOption selectedQuickOcrLanguage = new("OcrLanguage.English", OcrLanguageMode.English);
     private bool suppressQuickSettingsPersistence;
     private readonly SemaphoreSlim settingsSaveGate = new(1, 1);
@@ -582,7 +582,6 @@ public sealed class MainWindowViewModel : ObservableObject
         QuickOcrModeOptions = CreateOcrModeOptions(languageMode);
         QuickOcrLanguageOptions =
         [
-            new OcrLanguageOption("OcrLanguage.Auto", OcrLanguageMode.Auto, isEnabled: false, descriptionKey: "Common.InActiveDevelopment"),
             new OcrLanguageOption("OcrLanguage.English", OcrLanguageMode.English),
             new OcrLanguageOption("OcrLanguage.Russian", OcrLanguageMode.Russian),
         ];
@@ -702,7 +701,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private static string GetOcrRecommendationText(OcrLanguageMode languageMode)
         => languageMode switch
         {
-            OcrLanguageMode.Auto => Localizer["ControlCenter.OcrRecommendation.Auto"],
             OcrLanguageMode.Russian => Localizer["ControlCenter.OcrRecommendation.Russian"],
             _ => Localizer["ControlCenter.OcrRecommendation.English"],
         };
@@ -711,12 +709,15 @@ public sealed class MainWindowViewModel : ObservableObject
         => AppSettings.NormalizeVisibleOcrLanguageMode(languageMode) == OcrLanguageMode.Russian
             ?
             [
-                new OcrModeOption("OcrMode.Fast", OcrMode.Fast, isEnabled: false, descriptionKey: "Common.InDevelopmentForRussian"),
+                new OcrModeOption(
+                    "OcrMode.Fast",
+                    OcrMode.Fast,
+                    isEnabled: false,
+                    descriptionKey: "Common.InDevelopmentForRussian"),
                 new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
             ]
             :
             [
-                new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
                 new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
                 new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
             ];

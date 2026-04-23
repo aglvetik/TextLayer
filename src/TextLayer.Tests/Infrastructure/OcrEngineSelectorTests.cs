@@ -85,4 +85,26 @@ public sealed class OcrEngineSelectorTests
 
         Assert.Equal(OcrEngineSelector.AccurateEngineId, selected);
     }
+
+    [Fact]
+    public void MixedLanguageFast_UsesFastBranchOrchestration()
+    {
+        var analysis = new OcrImageAnalysis(
+            PixelWidth: 900,
+            PixelHeight: 600,
+            AverageLuminance: 220,
+            ContrastRange: 180,
+            EdgeDensity: 0.03,
+            IsDarkBackground: false,
+            IsLowContrast: false,
+            LikelySmallText: false,
+            LikelyChatScreenshot: false);
+
+        var selected = selector.SelectEngineId(
+            "mixed-ui.png",
+            new OcrRequestOptions(OcrMode.Fast, OcrLanguageMode.EnglishRussian),
+            analysis);
+
+        Assert.Equal(OcrEngineSelector.FastEngineId, selected);
+    }
 }

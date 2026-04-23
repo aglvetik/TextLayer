@@ -29,7 +29,6 @@ public sealed class SettingsWindowViewModel : ObservableObject
         ];
         OcrLanguageOptions =
         [
-            new OcrLanguageOption("OcrLanguage.Auto", OcrLanguageMode.Auto, isEnabled: false, descriptionKey: "Common.InActiveDevelopment"),
             new OcrLanguageOption("OcrLanguage.English", OcrLanguageMode.English),
             new OcrLanguageOption("OcrLanguage.Russian", OcrLanguageMode.Russian),
         ];
@@ -154,7 +153,6 @@ public sealed class SettingsWindowViewModel : ObservableObject
 
     public string OcrRecommendationText => SelectedOcrLanguage.Value switch
     {
-        OcrLanguageMode.Auto => UiTextService.Instance["ControlCenter.OcrRecommendation.Auto"],
         OcrLanguageMode.Russian => UiTextService.Instance["ControlCenter.OcrRecommendation.Russian"],
         _ => UiTextService.Instance["ControlCenter.OcrRecommendation.English"],
     };
@@ -180,12 +178,15 @@ public sealed class SettingsWindowViewModel : ObservableObject
         => AppSettings.NormalizeVisibleOcrLanguageMode(languageMode) == OcrLanguageMode.Russian
             ?
             [
-                new OcrModeOption("OcrMode.Fast", OcrMode.Fast, isEnabled: false, descriptionKey: "Common.InDevelopmentForRussian"),
+                new OcrModeOption(
+                    "OcrMode.Fast",
+                    OcrMode.Fast,
+                    isEnabled: false,
+                    descriptionKey: "Common.InDevelopmentForRussian"),
                 new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
             ]
             :
             [
-                new OcrModeOption("OcrMode.Auto", OcrMode.Auto),
                 new OcrModeOption("OcrMode.Fast", OcrMode.Fast),
                 new OcrModeOption("OcrMode.Accurate", OcrMode.Accurate),
             ];

@@ -41,6 +41,10 @@ public sealed class RecognizedDocumentScoreCalculator
             && character is not '#' and not '@' and not '%' and not '&' and not '*' and not '=');
 
         var alphaRatio = nonWhitespaceCount == 0 ? 0d : alphaNumericCount / (double)nonWhitespaceCount;
+        var protectedTokenHits = CountProtectedTokenHits(text);
+        var duplicateTokenPenalty = GetDuplicateTokenPenalty(document);
+        var mixedCorruptionPenalty = CountMixedCorruptedWords(document);
+        var cleanCyrillicWordBonus = CountCleanCyrillicWords(document);
         var averageConfidence = document.Words
             .Where(word => word.Confidence.HasValue)
             .Select(word => word.Confidence!.Value)
@@ -54,9 +58,9 @@ public sealed class RecognizedDocumentScoreCalculator
             && !string.Equals(word.NormalizedText, "\u0432", StringComparison.OrdinalIgnoreCase));
         var pseudoLatinPenalty = languageMode switch
         {
-            OcrLanguageMode.Russian => 10.5d,
-            OcrLanguageMode.EnglishRussian => 5.8d,
-            _ => 4.2d,
+            OcrLanguageMode.Russian => 18d,
+            OcrLanguageMode.EnglishRussian => 16d,
+            _ => 5d,
         };
         var pseudoCyrillicPenalty = languageMode switch
         {
@@ -76,7 +80,11 @@ public sealed class RecognizedDocumentScoreCalculator
             - (analysis.SuspiciousPseudoLatinWordCount * pseudoLatinPenalty)
             - (analysis.SuspiciousPseudoCyrillicWordCount * pseudoCyrillicPenalty)
             - (analysis.AmbiguousWordCount * 1.1d)
-            + (analysis.CorrectedWordCount * 3.6d);
+            - (mixedCorruptionPenalty * 8.5d)
+            - duplicateTokenPenalty
+            + (analysis.CorrectedWordCount * 3.6d)
+            + (protectedTokenHits * 5.8d)
+            + (cleanCyrillicWordBonus * (languageMode is OcrLanguageMode.Russian or OcrLanguageMode.EnglishRussian ? 1.35d : 0.3d));
 
         var languageFitScore = languageMode switch
         {
@@ -92,7 +100,7 @@ public sealed class RecognizedDocumentScoreCalculator
         {
             OcrLanguageMode.English when analysis.DominantScript == ScriptDominance.Latin => 16d,
             OcrLanguageMode.Russian when analysis.DominantScript == ScriptDominance.Cyrillic => 18d,
-            OcrLanguageMode.EnglishRussian when analysis.LikelyMixedText => 20d,
+            OcrLanguageMode.EnglishRussian when analysis.LikelyMixedText => 24d,
             OcrLanguageMode.EnglishRussian when analysis.DominantScript == ScriptDominance.Cyrillic && analysis.SuspiciousPseudoLatinWordCount == 0 => 8d,
             OcrLanguageMode.EnglishRussian when analysis.DominantScript == ScriptDominance.Latin && analysis.SuspiciousPseudoCyrillicWordCount == 0 => 8d,
             _ => 0d,
@@ -114,7 +122,7 @@ public sealed class RecognizedDocumentScoreCalculator
             || (document.Words.Count >= 10
                 && alphaRatio >= 0.58d
                 && suspiciousSymbolCount <= Math.Max(6, nonWhitespaceCount / 8)
-                && analysis.SuspiciousPseudoLatinWordCount <= 1
+                && analysis.SuspiciousPseudoLatinWordCount <= (languageMode == OcrLanguageMode.EnglishRussian ? 0 : 1)
                 && analysis.SuspiciousPseudoCyrillicWordCount <= 1
                 && analysis.MixedScriptWordCount <= Math.Max(1, document.Words.Count / 12));
 
@@ -155,4 +163,97 @@ public sealed class RecognizedDocumentScoreCalculator
 
         return OcrLanguageMode.EnglishRussian;
     }
+
+    private static int CountProtectedTokenHits(string text)
+    {
+        var tokens = new[]
+        {
+            "TextLayer",
+            "OCR",
+            "Windows",
+            "Tesseract",
+            "GitHub",
+            "Releases",
+            "Download",
+            "Setup",
+            "Ctrl+Shift+O",
+            "Esc",
+            ".exe",
+        };
+
+        return tokens.Count(token => text.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static double GetDuplicateTokenPenalty(RecognizedDocument document)
+    {
+        var repeatedCount = document.Words
+            .Select(word => NormalizeTokenForDuplication(word.NormalizedText))
+            .Where(token => token.Length >= 3)
+            .GroupBy(token => token, StringComparer.OrdinalIgnoreCase)
+            .Sum(group => Math.Max(0, group.Count() - 2));
+
+        return repeatedCount * 2.4d;
+    }
+
+    private static string NormalizeTokenForDuplication(string text)
+        => new(text.Where(char.IsLetterOrDigit).ToArray());
+
+    private static int CountMixedCorruptedWords(RecognizedDocument document)
+        => document.Words.Count(word => IsMixedCorruptedToken(word.NormalizedText));
+
+    private static int CountCleanCyrillicWords(RecognizedDocument document)
+        => document.Words.Count(word => IsCleanCyrillicToken(word.NormalizedText));
+
+    private static bool IsMixedCorruptedToken(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || LooksTechnicalToken(text))
+        {
+            return false;
+        }
+
+        var hasLatin = false;
+        var hasCyrillic = false;
+        foreach (var character in text)
+        {
+            if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                hasLatin = true;
+            }
+            else if (character is >= '\u0400' and <= '\u04FF')
+            {
+                hasCyrillic = true;
+            }
+        }
+
+        return hasLatin && hasCyrillic;
+    }
+
+    private static bool IsCleanCyrillicToken(string text)
+    {
+        var hasCyrillic = false;
+        foreach (var character in text)
+        {
+            if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                return false;
+            }
+
+            if (character is >= '\u0400' and <= '\u04FF')
+            {
+                hasCyrillic = true;
+            }
+        }
+
+        return hasCyrillic;
+    }
+
+    private static bool LooksTechnicalToken(string text)
+        => text.Contains("://", StringComparison.Ordinal)
+           || text.Contains("www.", StringComparison.OrdinalIgnoreCase)
+           || text.Contains(".exe", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("TextLayer", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Windows", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("GitHub", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Tesseract", StringComparison.OrdinalIgnoreCase)
+           || text.Contains("Ctrl", StringComparison.OrdinalIgnoreCase);
 }

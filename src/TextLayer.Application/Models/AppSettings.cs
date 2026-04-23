@@ -10,7 +10,7 @@ public sealed record AppSettings
 
     public bool AutoRunOcrOnOpen { get; init; } = true;
 
-    public OcrMode OcrMode { get; init; } = OcrMode.Auto;
+    public OcrMode OcrMode { get; init; } = OcrMode.Fast;
 
     public OcrLanguageMode OcrLanguageMode { get; init; } = OcrLanguageMode.English;
 
@@ -27,18 +27,31 @@ public sealed record AppSettings
     public WindowPlacementSettings WindowPlacement { get; init; } = new();
 
     public static OcrLanguageMode NormalizeVisibleOcrLanguageMode(OcrLanguageMode languageMode)
-        => languageMode == OcrLanguageMode.EnglishRussian
-            ? OcrLanguageMode.Auto
-            : languageMode;
+        => languageMode switch
+        {
+            OcrLanguageMode.Auto => OcrLanguageMode.English,
+            OcrLanguageMode.EnglishRussian => OcrLanguageMode.Russian,
+            _ => languageMode,
+        };
 
     public static OcrMode NormalizeOcrModeForLanguage(OcrMode mode, OcrLanguageMode languageMode)
-        => NormalizeVisibleOcrLanguageMode(languageMode) == OcrLanguageMode.Russian
-            ? OcrMode.Accurate
-            : mode;
+    {
+        var visibleLanguage = NormalizeVisibleOcrLanguageMode(languageMode);
+        if (visibleLanguage == OcrLanguageMode.Russian)
+        {
+            return OcrMode.Accurate;
+        }
+
+        return mode == OcrMode.Auto ? OcrMode.Fast : mode;
+    }
 
     public static AppSettings NormalizeOcrBehavior(AppSettings settings)
-        => NormalizeVisibleOcrLanguageMode(settings.OcrLanguageMode) == OcrLanguageMode.Russian
-            && settings.OcrMode != OcrMode.Accurate
-                ? settings with { OcrMode = OcrMode.Accurate }
-                : settings;
+    {
+        var visibleLanguage = NormalizeVisibleOcrLanguageMode(settings.OcrLanguageMode);
+        return settings with
+        {
+            OcrLanguageMode = visibleLanguage,
+            OcrMode = NormalizeOcrModeForLanguage(settings.OcrMode, visibleLanguage),
+        };
+    }
 }

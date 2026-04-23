@@ -22,8 +22,11 @@ public sealed class TesseractPreprocessingPlannerTests
         var plan = planner.CreatePlan(analysis, analysis.PixelWidth, analysis.PixelHeight);
 
         Assert.True(plan.UseDarkUiPass);
+        Assert.True(plan.UseNeutralGrayscalePass);
+        Assert.True(plan.UseBinarizedPass);
         Assert.True(plan.UseSmallTextPass);
         Assert.True(plan.UseAccentTextPass);
+        Assert.True(plan.UseInvertedAccentPass);
         Assert.True(plan.ScaleFactor > 1d);
     }
 
@@ -48,6 +51,7 @@ public sealed class TesseractPreprocessingPlannerTests
         Assert.False(plan.UseLowContrastPass);
         Assert.False(plan.UseSmallTextPass);
         Assert.False(plan.UseAccentTextPass);
+        Assert.False(plan.UseBinarizedPass);
         Assert.Equal(1.2d, plan.ScaleFactor, 3);
     }
 }

@@ -127,18 +127,22 @@ public sealed class CompositeOcrEngineTests
     }
 
     [Fact]
-    public async Task AccurateMode_EvaluatesMixedLanguageCandidate_ForMoreCoverage()
+    public async Task AccurateRussian_UsesSingleRussianCandidateThatKeepsEnglishTechnicalTokens()
     {
         var sourcePath = CreateTempImage();
         try
         {
             var fastEngine = new FakeOcrEngine((request, _) => CreateDocument("unused"));
-            var accurateEngine = new FakeOcrEngine((request, _) => CreateDocument(request.LanguageMode switch
+            var requests = new List<OcrRequestOptions>();
+            var accurateEngine = new FakeOcrEngine((request, _) =>
             {
-                OcrLanguageMode.Russian => "\u0412\u0430\u0436\u043d\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435",
-                OcrLanguageMode.EnglishRussian => "\u0412\u0430\u0436\u043d\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 Release notes beta 2",
-                _ => "Release notes beta 2",
-            }, OcrEngineSelector.AccurateEngineId));
+                requests.Add(request);
+                return CreateDocument(
+                    request.LanguageMode == OcrLanguageMode.Russian
+                        ? "\u0412\u0430\u0436\u043d\u043e\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 Release notes beta 2"
+                        : "Release notes beta 2",
+                    OcrEngineSelector.AccurateEngineId);
+            });
 
             var engine = new CompositeOcrEngine(
                 fastEngine,
@@ -155,6 +159,83 @@ public sealed class CompositeOcrEngineTests
             Assert.Equal(OcrEngineSelector.AccurateEngineId, document.OcrEngineId);
             Assert.Contains("Release", document.FullText);
             Assert.Contains("\u0412\u0430\u0436\u043d\u043e\u0435", document.FullText);
+            Assert.Single(requests);
+            Assert.Equal(OcrLanguageMode.Russian, requests[0].LanguageMode);
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [Fact]
+    public async Task MixedFastMode_DelegatesToFastEngine_ForLineRoutedProcessing()
+    {
+        var sourcePath = CreateTempImage();
+        try
+        {
+            var requests = new List<OcrRequestOptions>();
+            var fastEngine = new FakeOcrEngine((request, _) =>
+            {
+                requests.Add(request);
+                return CreateDocument("Mixed line routed via Windows OCR", OcrEngineSelector.FastEngineId);
+            });
+            var accurateEngine = new FakeOcrEngine((request, _) => CreateDocument("unused", OcrEngineSelector.AccurateEngineId));
+
+            var engine = new CompositeOcrEngine(
+                fastEngine,
+                accurateEngine,
+                new OcrImageAnalyzer(),
+                new OcrEngineSelector(),
+                new TestLogService());
+
+            var document = await engine.RecognizeAsync(
+                sourcePath,
+                new OcrRequestOptions(OcrMode.Fast, OcrLanguageMode.EnglishRussian),
+                CancellationToken.None);
+
+            Assert.Equal(OcrEngineSelector.FastEngineId, document.OcrEngineId);
+            Assert.Single(requests);
+            Assert.Equal(OcrMode.Fast, requests[0].Mode);
+            Assert.Equal(OcrLanguageMode.EnglishRussian, requests[0].LanguageMode);
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [Fact]
+    public async Task MixedLanguageMode_PreservesBilingualCandidate_WhenSingleLanguageScoresHigher()
+    {
+        var sourcePath = CreateTempImage();
+        try
+        {
+            var fastEngine = new FakeOcrEngine((request, _) => CreateDocument("unused"));
+            var accurateEngine = new FakeOcrEngine((request, _) => CreateDocument(request.LanguageMode switch
+            {
+                OcrLanguageMode.Russian => "\u0412\u0430\u0436\u043d\u043e\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435",
+                OcrLanguageMode.English => "Important message TextLayer Windows GitHub Releases Download Setup",
+                OcrLanguageMode.EnglishRussian => "\u0412\u0430\u0436\u043d\u043E\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 TextLayer GitHub Releases",
+                _ => "\u0412\u0430\u0436\u043d\u043E\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 TextLayer GitHub Releases",
+            }, OcrEngineSelector.AccurateEngineId));
+
+            var engine = new CompositeOcrEngine(
+                fastEngine,
+                accurateEngine,
+                new OcrImageAnalyzer(),
+                new OcrEngineSelector(),
+                new TestLogService());
+
+            var document = await engine.RecognizeAsync(
+                sourcePath,
+                new OcrRequestOptions(OcrMode.Accurate, OcrLanguageMode.EnglishRussian),
+                CancellationToken.None);
+
+            Assert.Equal(OcrEngineSelector.AccurateEngineId, document.OcrEngineId);
+            Assert.Contains("TextLayer", document.FullText);
+            Assert.Contains("GitHub", document.FullText);
+            Assert.Contains("\u0412\u0430\u0436", document.FullText);
         }
         finally
         {
